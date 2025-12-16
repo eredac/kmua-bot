@@ -149,6 +149,11 @@ _max_concurrent_requests: int = 3  # Maximum concurrent API requests
 # Model tier configuration
 # 注意：顺序很重要！更具体的模式要先匹配，以避免被通用模式提前匹配
 MODEL_TIER_CONFIG = {
+    'unlimited': {
+        'patterns': ['imagen-', '-flash-image', 'nano-banana'],  # imagen系列 + flash-image系列 + nano-banana基础版（注意：-flash-image 要在 gemini- 之前匹配）
+        'daily_limit': 0,  # 无限制
+        'description': '不限制'
+    },
     'standard': {
         'patterns': ['nano-banana-pro', 'gemini-', '-pro-image-'],  # banana-pro系列 + gemini-pro系列
         'daily_limit': 5,
@@ -158,11 +163,6 @@ MODEL_TIER_CONFIG = {
         'patterns': ['stable-diffusion', 'gpt-image-'],  # stable-diffusion系列 + gpt-image系列
         'daily_limit': 20,
         'description': '每日20次'
-    },
-    'unlimited': {
-        'patterns': ['imagen-', '-flash-image', 'nano-banana'],  # imagen系列 + flash-image系列 + nano-banana基础版
-        'daily_limit': 0,  # 无限制
-        'description': '不限制'
     }
 }
 
@@ -172,6 +172,11 @@ def get_model_tier(model: str) -> tuple[str, int]:
     获取模型所属分级
     返回: (tier名称, 每日限额)
     """
+    # 特殊处理：nano-banana-pro 系列优先于 nano-banana
+    if 'nano-banana-pro' in model:
+        return 'standard', MODEL_TIER_CONFIG['standard']['daily_limit']
+
+    # 按配置顺序检查
     for tier_name, config in MODEL_TIER_CONFIG.items():
         for pattern in config['patterns']:
             if pattern in model:

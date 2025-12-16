@@ -150,6 +150,39 @@ _max_concurrent_requests: int = 3  # Maximum concurrent API requests
 _models_cache: Dict[str, list[str]] = {}
 _last_models_fetch: datetime | None = None
 
+# Model tier configuration
+MODEL_TIER_CONFIG = {
+    'unlimited': {
+        'patterns': ['imagen-', 'nano-banana', 'gpt-image-'],  # imagen系列 + nano-banana基础版 + gpt-image
+        'daily_limit': 0,  # 无限制
+        'description': '不限制'
+    },
+    'standard': {
+        'patterns': ['nano-banana-pro', 'gemini-', '-pro-image-'],  # banana-pro系列 + gemini-pro系列
+        'daily_limit': 5,
+        'description': '每日5次'
+    },
+    'sd': {
+        'patterns': ['stable-diffusion'],  # stable-diffusion系列
+        'daily_limit': 20,
+        'description': '每日20次'
+    }
+}
+
+
+def get_model_tier(model: str) -> tuple[str, int]:
+    """
+    获取模型所属分级
+    返回: (tier名称, 每日限额)
+    """
+    for tier_name, config in MODEL_TIER_CONFIG.items():
+        for pattern in config['patterns']:
+            if pattern in model:
+                return tier_name, config['daily_limit']
+
+    # 默认不限制
+    return 'unlimited', 0
+
 
 async def fetch_available_models() -> list[str]:
     """从API获取可用模型列表（Google格式，每日零点刷新缓存）"""
@@ -220,17 +253,20 @@ async def fetch_available_models() -> list[str]:
 async def get_or_create_daily_usage(
     user_id: int,
     today: str,
+    tier: str,
     session: AsyncSession | None = None
 ) -> ImageGenDailyUsage:
     """获取或创建今日使用记录"""
     assert session is not None
 
-    usage = await session.get(ImageGenDailyUsage, user_id)
+    # 使用复合主键查询
+    usage = await session.get(ImageGenDailyUsage, {"user_id": user_id, "model_tier": tier})
 
     if usage is None:
         # 创建新记录
         usage = ImageGenDailyUsage(
             user_id=user_id,
+            model_tier=tier,
             usage_count=0,
             usage_date=today
         )
@@ -249,16 +285,19 @@ async def get_or_create_daily_usage(
 async def increment_usage_in_db(
     user_id: int,
     today: str,
+    tier: str,
     session: AsyncSession | None = None
 ) -> None:
     """在数据库中递增使用次数"""
     assert session is not None
 
-    usage = await session.get(ImageGenDailyUsage, user_id)
+    # 使用复合主键查询
+    usage = await session.get(ImageGenDailyUsage, {"user_id": user_id, "model_tier": tier})
 
     if usage is None:
         usage = ImageGenDailyUsage(
             user_id=user_id,
+            model_tier=tier,
             usage_count=1,
             usage_date=today
         )
@@ -288,8 +327,11 @@ async def check_daily_limit(user_id: int, model: str) -> tuple[bool, int, int]:
     检查用户每日使用次数限制
     返回: (是否允许, 今日已用次数, 每日限额)
     """
-    # 只对 nano-banana-pro 系列模型限制(不包括 nano-banana)
-    if not model.startswith('nano-banana-pro'):
+    # 获取模型分级
+    tier, daily_limit = get_model_tier(model)
+
+    # 无限制的模型直接返回
+    if daily_limit == 0:
         return True, 0, 0
 
     # 检查是否为管理员
@@ -300,17 +342,19 @@ async def check_daily_limit(user_id: int, model: str) -> tuple[bool, int, int]:
     today = datetime.now().strftime('%Y-%m-%d')
 
     # 从数据库获取今日使用次数
-    usage = await get_or_create_daily_usage(user_id, today)
+    usage = await get_or_create_daily_usage(user_id, today, tier)
     used_count = usage.usage_count
-    daily_limit = 5
 
     return used_count < daily_limit, used_count, daily_limit
 
 
 async def increment_daily_usage(user_id: int, model: str):
     """递增用户今日使用次数"""
-    # 只对 nano-banana-pro 系列模型计数(不包括 nano-banana)
-    if not model.startswith('nano-banana-pro'):
+    # 获取模型分级
+    tier, daily_limit = get_model_tier(model)
+
+    # 无限制的模型不计数
+    if daily_limit == 0:
         return
 
     # 管理员不计数
@@ -320,7 +364,7 @@ async def increment_daily_usage(user_id: int, model: str):
     today = datetime.now().strftime('%Y-%m-%d')
 
     # 在数据库中递增使用次数
-    await increment_usage_in_db(user_id, today)
+    await increment_usage_in_db(user_id, today, tier)
 
 
 @with_session
@@ -937,22 +981,43 @@ async def imgmodel_command(client: pyrogram.Client, message: Message):
         try:
             available_models = await fetch_available_models()
 
-            # 格式化模型列表
-            models_text = "\n".join([f"- {model}" for model in available_models])
+            # 分类模型
+            unlimited_models = []
+            standard_models = []
+            sd_models = []
 
-            # 标注特殊模型的限制说明
-            notes = "\n\n💡 说明："
-            has_pro_models = any("nano-banana-pro" in m for m in available_models)
-            if has_pro_models:
-                notes += "\n• nano-banana-pro 系列模型每日限制5次"
-                notes += "\n• 其他模型无限制"
+            for model in available_models:
+                tier, limit = get_model_tier(model)
+                if tier == 'unlimited':
+                    unlimited_models.append(model)
+                elif tier == 'standard':
+                    standard_models.append(model)
+                elif tier == 'sd':
+                    sd_models.append(model)
 
-            await status_msg.edit_text(
-                f"你当前使用的模型: {current_model}\n"
-                f"\n📋 可用模型:\n{models_text}"
-                f"{notes}\n"
-                f"\n用法: /imgmodel [模型名称]"
-            )
+            # 格式化输出
+            notes = f"你当前使用的模型: {current_model}\n"
+            notes += "\n📋 可用模型分类:\n"
+
+            if unlimited_models:
+                notes += "\n🟢 不限制使用:"
+                for m in unlimited_models:
+                    notes += f"\n  - {m}"
+
+            if standard_models:
+                notes += "\n\n🟡 每日5次:"
+                for m in standard_models:
+                    notes += f"\n  - {m}"
+
+            if sd_models:
+                notes += "\n\n🔵 每日20次:"
+                for m in sd_models:
+                    notes += f"\n  - {m}"
+
+            notes += "\n\n💡 提示: 管理员无使用次数限制"
+            notes += "\n\n用法: /imgmodel [模型名称]"
+
+            await status_msg.edit_text(notes)
         except Exception as e:
             logger.error(f"Failed to fetch models in command: {e}")
             await status_msg.edit_text(

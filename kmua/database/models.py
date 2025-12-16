@@ -359,11 +359,16 @@ class ImageGenDailyUsage(Base):
         primary_key=True,
         index=True,
     )
+    model_tier: Mapped[str] = mapped_column(
+        String(32),
+        primary_key=True,
+        default="standard"
+    )
     usage_count: Mapped[int] = mapped_column(Integer, default=0)
     usage_date: Mapped[str] = mapped_column(String(16), nullable=False)
 
     def __repr__(self) -> str:
-        return f"<ImageGenDailyUsage(user_id={self.user_id}, usage_count={self.usage_count}, usage_date='{self.usage_date}')>"
+        return f"<ImageGenDailyUsage(user_id={self.user_id}, tier='{self.model_tier}', usage_count={self.usage_count}, usage_date='{self.usage_date}')>"
 
 
 class UserImageGenConfig(Base):

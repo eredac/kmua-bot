@@ -348,3 +348,34 @@ class Bottle(Base):
 
     def __repr__(self) -> str:
         return f"<Bottle(id={self.id}, sender_id={self.sender_id})>"
+
+
+class ImageGenDailyUsage(Base):
+    __tablename__ = "image_gen_daily_usage"
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("user_data.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    usage_count: Mapped[int] = mapped_column(Integer, default=0)
+    usage_date: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<ImageGenDailyUsage(user_id={self.user_id}, usage_count={self.usage_count}, usage_date='{self.usage_date}')>"
+
+
+class UserImageGenConfig(Base):
+    __tablename__ = "user_image_gen_config"
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("user_data.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    model: Mapped[str] = mapped_column(String(64), nullable=False, default="nano-banana")
+
+    def __repr__(self) -> str:
+        return f"<UserImageGenConfig(user_id={self.user_id}, model='{self.model}')>"

@@ -151,12 +151,8 @@ _models_cache: Dict[str, list[str]] = {}
 _last_models_fetch: datetime | None = None
 
 # Model tier configuration
+# 注意：顺序很重要！更具体的模式要先匹配，以避免被通用模式提前匹配
 MODEL_TIER_CONFIG = {
-    'unlimited': {
-        'patterns': ['imagen-', 'nano-banana', 'gpt-image-'],  # imagen系列 + nano-banana基础版 + gpt-image
-        'daily_limit': 0,  # 无限制
-        'description': '不限制'
-    },
     'standard': {
         'patterns': ['nano-banana-pro', 'gemini-', '-pro-image-'],  # banana-pro系列 + gemini-pro系列
         'daily_limit': 5,
@@ -166,6 +162,11 @@ MODEL_TIER_CONFIG = {
         'patterns': ['stable-diffusion'],  # stable-diffusion系列
         'daily_limit': 20,
         'description': '每日20次'
+    },
+    'unlimited': {
+        'patterns': ['imagen-', 'nano-banana', 'gpt-image-'],  # imagen系列 + nano-banana基础版 + gpt-image
+        'daily_limit': 0,  # 无限制
+        'description': '不限制'
     }
 }
 

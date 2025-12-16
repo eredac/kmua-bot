@@ -59,6 +59,11 @@ async def init_bot(client: Client = client):
             BotCommand("config", i18n.t("bot.cmd.config", locale=app_config.lang)),
             BotCommand("greet", i18n.t("bot.cmd.greet", locale=app_config.lang)),
             BotCommand("help", i18n.t("bot.cmd.help", locale=app_config.lang)),
+            # Image generation commands
+            BotCommand("genimg", "生成图片 (AI)"),
+            BotCommand("editimg", "编辑图片 (AI)"),
+            BotCommand("multiedit", "批量编辑图片 (AI)"),
+            BotCommand("imgmodel", "切换图片模型"),
         ]
     )
     common.jobqueue.add_daily_job("cleanup", jobs.cleanup, hour=4)

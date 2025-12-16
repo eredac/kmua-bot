@@ -146,10 +146,6 @@ _last_usage: Dict[int, float] = {}
 _active_requests: int = 0
 _max_concurrent_requests: int = 3  # Maximum concurrent API requests
 
-# Model list cache (refreshed daily at midnight)
-_models_cache: Dict[str, list[str]] = {}
-_last_models_fetch: datetime | None = None
-
 # Model tier configuration
 # 注意：顺序很重要！更具体的模式要先匹配，以避免被通用模式提前匹配
 MODEL_TIER_CONFIG = {
@@ -159,12 +155,12 @@ MODEL_TIER_CONFIG = {
         'description': '每日5次'
     },
     'sd': {
-        'patterns': ['stable-diffusion'],  # stable-diffusion系列
+        'patterns': ['stable-diffusion', 'gpt-image-'],  # stable-diffusion系列 + gpt-image系列
         'daily_limit': 20,
         'description': '每日20次'
     },
     'unlimited': {
-        'patterns': ['imagen-', 'nano-banana', 'gpt-image-'],  # imagen系列 + nano-banana基础版 + gpt-image
+        'patterns': ['imagen-', '-flash-image', 'nano-banana'],  # imagen系列 + flash-image系列 + nano-banana基础版
         'daily_limit': 0,  # 无限制
         'description': '不限制'
     }
@@ -186,68 +182,30 @@ def get_model_tier(model: str) -> tuple[str, int]:
 
 
 async def fetch_available_models() -> list[str]:
-    """从API获取可用模型列表（Google格式，每日零点刷新缓存）"""
-    global _models_cache, _last_models_fetch
-
-    # 检查是否需要刷新缓存（每日零点刷新）
-    now = datetime.now()
-    today_key = now.strftime('%Y-%m-%d')
-
-    # 如果今天的缓存存在，直接返回
-    if today_key in _models_cache and _last_models_fetch:
-        logger.debug(f"Using cached models for {today_key}")
-        return _models_cache[today_key]
-
-    # 清理旧缓存
-    if _models_cache and today_key not in _models_cache:
-        logger.debug("Clearing old model cache")
-        _models_cache.clear()
-
-    try:
-        # 使用 Google 格式请求（x-goog-api-key）
-        headers = {
-            "x-goog-api-key": _settings.image_gen_api_key,
-            "Content-Type": "application/json",
-        }
-
-        api_url = _settings.get('image_gen_url', 'https://api.openai.com/v1')
-
-        logger.info(f"Fetching available models from {api_url}/v1/models")
-
-        async with httpx.AsyncClient(headers=headers, timeout=30) as client:
-            response = await client.get(f"{api_url}/v1/models")
-            response.raise_for_status()
-
-            data = response.json()
-
-            # 提取模型ID列表
-            models = []
-            if "data" in data:
-                for model_info in data["data"]:
-                    if "id" in model_info:
-                        models.append(model_info["id"])
-
-            if models:
-                # 缓存结果
-                _models_cache[today_key] = models
-                _last_models_fetch = now
-                logger.success(f"Fetched {len(models)} models from API")
-                return models
-            else:
-                raise ValueError("No models found in API response")
-
-    except Exception as e:
-        logger.error(f"Failed to fetch models from API: {e}")
-        # 返回默认模型列表作为后备
-        default_models = [
-            "nano-banana",
-            "nano-banana-pro",
-            "nano-banana-pro-2k",
-            "nano-banana-pro-4k",
-            "gemini-2.5-flash-image"
-        ]
-        logger.warning(f"Using default model list: {default_models}")
-        return default_models
+    """返回本地配置的可用模型列表"""
+    # 本地固定的模型列表，不再从API获取
+    models = [
+        # 不限制使用
+        "nano-banana",
+        "imagen-3.0-generate-002",
+        "imagen-4.0-fast-generate-001",
+        "imagen-4.0-generate-001",
+        "imagen-4.0-ultra-generate-001",
+        "gemini-2.5-flash-image",
+        "gemini-3-pro-image-preview",
+        # 每日5次
+        "nano-banana-pro",
+        "nano-banana-pro-2k",
+        "nano-banana-pro-4k",
+        # 每日20次
+        "stable-diffusion",
+        "stable-diffusion-3-medium",
+        "stable-diffusion-3.5-large-turbo",
+        "stable-diffusion-xl-base-1.0",
+        "gpt-image-1",
+    ]
+    logger.debug(f"Using local model list: {len(models)} models")
+    return models
 
 
 @with_session

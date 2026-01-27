@@ -19,3 +19,4 @@ bot:
     config: 更改群组设置
     greet: 设置群组欢迎语
     help: 帮助|更多功能
+    muteme: 主动禁言自己

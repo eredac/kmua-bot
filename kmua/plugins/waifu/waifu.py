@@ -525,6 +525,38 @@ async def change_waifu(client: PyrogramClient, query: pyrogram.types.CallbackQue
         await common.memstore.delete(lock_key)
 
 
+@PyrogramClient.on_message(pyrogram.filters.command("cleanwaifu"), group=0)
+async def clean_waifu_data(client: PyrogramClient, message: pyrogram.types.Message):
+    """手动清理 waifu 数据，仅限 owner 使用"""
+    user = message.from_user
+    if not user or not user.id:
+        return
+
+    # 检查是否为 owner
+    if user.id not in app_config.owners:
+        await message.reply_text("⚠️ 无权限：此命令仅限 Bot Owner 使用")
+        return
+
+    # 检查是否正在清理中
+    if await common.memstore.get(enums.GLockKey.CLEANING, False):
+        await message.reply_text("⏳ 正在清理中，请稍后...")
+        return
+
+    try:
+        await common.memstore.set(enums.GLockKey.CLEANING, True)
+        status_msg = await message.reply_text("🧹 正在清理 waifu 数据...")
+
+        await database.cleanup_waifu_data()
+
+        await status_msg.edit_text("✅ Waifu 数据清理完成！所有今日配对已重置。")
+        logger.info(f"Waifu data cleaned by owner {user.id} ({user.first_name})")
+    except Exception as e:
+        logger.exception(f"Failed to clean waifu data: {e}")
+        await message.reply_text(f"❌ 清理失败: {str(e)}")
+    finally:
+        await common.memstore.delete(enums.GLockKey.CLEANING)
+
+
 @PyrogramClient.on_callback_query(
     pyrogram.filters.regex(r"^user_waifu_manage"), group=0
 )

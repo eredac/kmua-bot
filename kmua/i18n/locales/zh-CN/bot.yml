@@ -79,6 +79,7 @@ bot:
       /forget - 让 bot 忘记与你的对话记录
       /throwbottle - 扔一个漂流瓶
       /pickbottle - 捡一个漂流瓶
+      /muteme - 主动禁言自己
       </blockquote>
       对其他人使用 "/" 或 "\" 即可对其施法
     help_inline: |
@@ -142,3 +143,32 @@ bot:
     wordcloud:
       generating: 已经正在生成啦, 请稍等一会儿...
       generated: 最近聊天记录的词云图
+    muteme:
+      success: "主人{username}选择暂时沉默{duration}"
+      errors:
+        admin: 我无法禁言管理员
+        no_user: 无法获取用户信息
+        no_time: |
+          请提供禁言时间!
+          使用方法: /muteme <时间>
+
+          时间格式: <数字><单位>
+          单位说明: M/m (分钟), H/h (小时), D/d (天), W/w (周)
+
+          示例:
+          /muteme 30m  - 禁言 30 分钟
+          /muteme 2H   - 禁言 2 小时
+          /muteme 7d   - 禁言 7 天
+          /muteme 1W   - 禁言 1 周
+        invalid_format: |
+          无效的时间格式喵!
+
+          正确格式: <数字><单位>
+          单位: M/m (分钟), H/h (小时), D/d (天), W/w (周)
+
+          示例: /muteme 30m
+        too_long: "禁言时间太长了! 最多只能禁言 {max_days} 天哦"
+        bot_no_permission: |
+          浮浮酱没有足够的权限呢...
+          请确保 bot 拥有「封禁用户」权限喵~
+        generic: "禁言失败了喵... 错误: {error}"

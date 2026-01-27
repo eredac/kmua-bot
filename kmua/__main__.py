@@ -64,6 +64,8 @@ async def init_bot(client: Client = client):
             BotCommand("editimg", "编辑图片 (AI)"),
             BotCommand("multiedit", "批量编辑图片 (AI)"),
             BotCommand("imgmodel", "切换图片模型"),
+            # Minecraft server status
+            BotCommand("mcstatus", "群mc服务器连通情况"),
         ]
     )
     common.jobqueue.add_daily_job("cleanup", jobs.cleanup, hour=4)

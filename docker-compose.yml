@@ -1,6 +1,7 @@
+
 services:
   kmua:
-    image: ghcr.io/krau/kmua-bot:v2
+    image: kmua-bot:local
     container_name: kmua-bot
     restart: unless-stopped
     volumes:
@@ -10,3 +11,4 @@ services:
     environment:
       - TZ=Asia/Shanghai
     network_mode: host
+

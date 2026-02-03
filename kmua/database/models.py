@@ -355,20 +355,30 @@ class ImageGenDailyUsage(Base):
 
     user_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("user_data.id", ondelete="CASCADE"),
         primary_key=True,
+        autoincrement=False,
         index=True,
     )
-    model_tier: Mapped[str] = mapped_column(
-        String(32),
-        primary_key=True,
-        default="standard"
+
+    usage_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
     )
-    usage_count: Mapped[int] = mapped_column(Integer, default=0)
-    usage_date: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    usage_date: Mapped[str] = mapped_column(
+        String(10),  # Format: YYYY-MM-DD
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
     def __repr__(self) -> str:
-        return f"<ImageGenDailyUsage(user_id={self.user_id}, tier='{self.model_tier}', usage_count={self.usage_count}, usage_date='{self.usage_date}')>"
+        return f"<ImageGenDailyUsage(user_id={self.user_id}, usage_count={self.usage_count}, usage_date='{self.usage_date}')>"
 
 
 class UserImageGenConfig(Base):
@@ -376,11 +386,130 @@ class UserImageGenConfig(Base):
 
     user_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("user_data.id", ondelete="CASCADE"),
         primary_key=True,
+        autoincrement=False,
         index=True,
     )
-    model: Mapped[str] = mapped_column(String(64), nullable=False, default="nano-banana")
+
+    model: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
     def __repr__(self) -> str:
         return f"<UserImageGenConfig(user_id={self.user_id}, model='{self.model}')>"
+
+
+class DealerModeConfig(Base):
+    """荷官模式配置表"""
+    __tablename__ = "dealer_mode_config"
+
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=False,
+        index=True,
+    )
+
+    enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+
+    start_time: Mapped[str] = mapped_column(
+        String(5),  # Format: HH:MM
+        default="20:00",
+        nullable=False,
+    )
+
+    end_time: Mapped[str] = mapped_column(
+        String(5),  # Format: HH:MM
+        default="22:00",
+        nullable=False,
+    )
+
+    late_players: Mapped[dict] = mapped_column(
+        JSON,
+        default=dict,
+        nullable=False,
+    )
+    """记录迟到玩家信息 {"user_id": {"username": "xxx", "first_name": "xxx", "roll_count": 1}}"""
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<DealerModeConfig(chat_id={self.chat_id}, enabled={self.enabled})>"
+
+
+class QuestionReference(Base):
+    """参考提问表"""
+    __tablename__ = "question_reference"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+        index=True,
+    )
+
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        index=True,
+    )
+
+    question_text: Mapped[str] = mapped_column(
+        String(4096),
+        nullable=False,
+    )
+
+    embedding_hash: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+    )
+    """向量的哈希值，用于快速去重"""
+
+    winner_id: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        index=True,
+    )
+    """提问方 user_id"""
+
+    loser_ids: Mapped[str] = mapped_column(
+        String(256),
+        nullable=False,
+    )
+    """回答方 user_id 列表（逗号分隔）"""
+
+    used_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+    """被使用次数（作为参考被查看的次数）"""
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<QuestionReference(id={self.id}, chat_id={self.chat_id}, used_count={self.used_count})>"

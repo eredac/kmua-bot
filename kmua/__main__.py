@@ -66,6 +66,14 @@ async def init_bot(client: Client = client):
             BotCommand("imgmodel", "切换图片模型"),
             # Minecraft server status
             BotCommand("mcstatus", "群mc服务器连通情况"),
+            # Dice game commands
+            BotCommand("dice", "🎲 发起真心话大冒险游戏"),
+            BotCommand("dice_end", "⏹ 停止当前游戏"),
+            BotCommand("dice_status", "📊 查看游戏状态"),
+            BotCommand("dealer", "🎰 荷官模式管理"),
+            BotCommand("dice_stats", "📚 查看提问统计"),
+            # Music search
+            BotCommand("ms", "🎵 搜索音乐"),
         ]
     )
     common.jobqueue.add_daily_job("cleanup", jobs.cleanup, hour=4)

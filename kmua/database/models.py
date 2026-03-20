@@ -10,6 +10,8 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import (
@@ -83,23 +85,24 @@ class ChatConfig:
 
 class UserChatAssociation(Base):
     __tablename__ = "user_chat_association"
+    __table_args__ = {"schema": "shared"}
 
     user_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("user_data.id", ondelete="CASCADE"),
+        ForeignKey("shared.user_data.id", ondelete="CASCADE"),
         primary_key=True,
         index=True,
     )
     chat_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("chat_data.id", ondelete="CASCADE"),
+        ForeignKey("shared.chat_data.id", ondelete="CASCADE"),
         primary_key=True,
         index=True,
     )
 
     waifu_id: Mapped[int | None] = mapped_column(
         BigInteger,
-        ForeignKey("user_data.id", ondelete="SET NULL"),
+        ForeignKey("shared.user_data.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -119,6 +122,7 @@ class UserChatAssociation(Base):
 
 class UserData(Base):
     __tablename__ = "user_data"
+    __table_args__ = {"schema": "shared"}
 
     id: Mapped[int] = mapped_column(
         BigInteger,
@@ -142,7 +146,7 @@ class UserData(Base):
     is_married: Mapped[bool] = mapped_column(Boolean, default=False)
     married_waifu_id: Mapped[int | None] = mapped_column(
         BigInteger,
-        ForeignKey("user_data.id", ondelete="SET NULL"),
+        ForeignKey("shared.user_data.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -168,7 +172,7 @@ class UserData(Base):
 
     chats: Mapped[List["ChatData"]] = relationship(
         "ChatData",
-        secondary="user_chat_association",
+        secondary="shared.user_chat_association",
         back_populates="members",
         primaryjoin="UserData.id == UserChatAssociation.user_id",
         secondaryjoin="ChatData.id == UserChatAssociation.chat_id",
@@ -202,6 +206,7 @@ class UserData(Base):
 
 class ChatData(Base):
     __tablename__ = "chat_data"
+    __table_args__ = {"schema": "shared"}
 
     id: Mapped[int] = mapped_column(
         BigInteger,
@@ -230,7 +235,7 @@ class ChatData(Base):
 
     members: Mapped[List["UserData"]] = relationship(
         "UserData",
-        secondary="user_chat_association",
+        secondary="shared.user_chat_association",
         back_populates="chats",
         primaryjoin="ChatData.id == UserChatAssociation.chat_id",
         secondaryjoin="UserData.id == UserChatAssociation.user_id",
@@ -258,18 +263,19 @@ class ChatData(Base):
 
 class Quote(Base):
     __tablename__ = "quotes"
+    __table_args__ = {"schema": "kmua"}
 
     link: Mapped[str] = mapped_column(String(256), primary_key=True)
 
     chat_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("chat_data.id", ondelete="CASCADE"),
+        ForeignKey("shared.chat_data.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     user_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("user_data.id", ondelete="CASCADE"),
+        ForeignKey("shared.user_data.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -308,6 +314,7 @@ class Quote(Base):
 
 class Bottle(Base):
     __tablename__ = "bottles"
+    __table_args__ = {"schema": "kmua"}
 
     id: Mapped[int] = mapped_column(
         Integer,
@@ -318,7 +325,7 @@ class Bottle(Base):
 
     sender_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("user_data.id", ondelete="SET NULL"),
+        ForeignKey("shared.user_data.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -327,15 +334,6 @@ class Bottle(Base):
     reports: Mapped[int] = mapped_column(BigInteger, default=0)
     file_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
     media_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    """
-    meida_type can be one of the following:
-    - image
-    - video
-    - audio
-    - document
-    - voice
-    - None (for text-only bottles)
-    """
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -352,6 +350,7 @@ class Bottle(Base):
 
 class ImageGenDailyUsage(Base):
     __tablename__ = "image_gen_daily_usage"
+    __table_args__ = {"schema": "kmua"}
 
     user_id: Mapped[int] = mapped_column(
         BigInteger,
@@ -367,7 +366,7 @@ class ImageGenDailyUsage(Base):
     )
 
     usage_date: Mapped[str] = mapped_column(
-        String(10),  # Format: YYYY-MM-DD
+        String(10),
         nullable=False,
     )
 
@@ -383,6 +382,7 @@ class ImageGenDailyUsage(Base):
 
 class UserImageGenConfig(Base):
     __tablename__ = "user_image_gen_config"
+    __table_args__ = {"schema": "kmua"}
 
     user_id: Mapped[int] = mapped_column(
         BigInteger,
@@ -409,6 +409,7 @@ class UserImageGenConfig(Base):
 class DealerModeConfig(Base):
     """荷官模式配置表"""
     __tablename__ = "dealer_mode_config"
+    __table_args__ = {"schema": "kmua"}
 
     chat_id: Mapped[int] = mapped_column(
         BigInteger,
@@ -424,13 +425,13 @@ class DealerModeConfig(Base):
     )
 
     start_time: Mapped[str] = mapped_column(
-        String(5),  # Format: HH:MM
+        String(5),
         default="20:00",
         nullable=False,
     )
 
     end_time: Mapped[str] = mapped_column(
-        String(5),  # Format: HH:MM
+        String(5),
         default="22:00",
         nullable=False,
     )
@@ -440,7 +441,6 @@ class DealerModeConfig(Base):
         default=dict,
         nullable=False,
     )
-    """记录迟到玩家信息 {"user_id": {"username": "xxx", "first_name": "xxx", "roll_count": 1}}"""
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -460,6 +460,7 @@ class DealerModeConfig(Base):
 class QuestionReference(Base):
     """参考提问表"""
     __tablename__ = "question_reference"
+    __table_args__ = {"schema": "kmua"}
 
     id: Mapped[int] = mapped_column(
         Integer,
@@ -484,27 +485,23 @@ class QuestionReference(Base):
         nullable=True,
         index=True,
     )
-    """向量的哈希值，用于快速去重"""
 
     winner_id: Mapped[int] = mapped_column(
         BigInteger,
         nullable=False,
         index=True,
     )
-    """提问方 user_id"""
 
     loser_ids: Mapped[str] = mapped_column(
         String(256),
         nullable=False,
     )
-    """回答方 user_id 列表（逗号分隔）"""
 
     used_count: Mapped[int] = mapped_column(
         Integer,
         default=0,
         nullable=False,
     )
-    """被使用次数（作为参考被查看的次数）"""
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -513,3 +510,192 @@ class QuestionReference(Base):
 
     def __repr__(self) -> str:
         return f"<QuestionReference(id={self.id}, chat_id={self.chat_id}, used_count={self.used_count})>"
+
+
+class UserPoints(Base):
+    """用户积分余额表，以 (user_id, chat_id) 为复合主键"""
+
+    __tablename__ = "user_points"
+    __table_args__ = {"schema": "shared"}
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.user_data.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.chat_data.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    points: Mapped[int] = mapped_column(
+        BigInteger,
+        default=0,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserPoints(user_id={self.user_id}, chat_id={self.chat_id}, points={self.points})>"
+
+
+class DailyCheckIn(Base):
+    """每日签到记录表"""
+
+    __tablename__ = "daily_checkin"
+    __table_args__ = {"schema": "shared"}
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+        index=True,
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.user_data.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.chat_data.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    checkin_date: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        index=True,
+    )
+    checkin_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+    points_earned: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<DailyCheckIn(user_id={self.user_id}, chat_id={self.chat_id}, date='{self.checkin_date}', type='{self.checkin_type}')>"
+
+
+class PointsTransaction(Base):
+    """积分流水表，记录每笔积分变动"""
+
+    __tablename__ = "points_transaction"
+    __table_args__ = {"schema": "shared"}
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+        index=True,
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.user_data.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.chat_data.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    amount: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+    )
+    reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    operator_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        nullable=True,
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<PointsTransaction(id={self.id}, user_id={self.user_id}, chat_id={self.chat_id}, amount={self.amount})>"
+
+
+class PendingQuestionState(Base):
+    """待提问状态持久化表（重启恢复用，5分钟 TTL）"""
+
+    __tablename__ = "pending_question_state"
+    __table_args__ = {"schema": "kmua"}
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=False,
+    )
+    state: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<PendingQuestionState(user_id={self.user_id}, expires_at={self.expires_at})>"
+
+
+class UserTag(Base):
+    """用户自定义群组标签，以 (user_id, chat_id) 为复合主键"""
+
+    __tablename__ = "user_tag"
+    __table_args__ = {"schema": "shared"}
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.user_data.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.chat_data.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tag_text: Mapped[str] = mapped_column(String(32), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserTag(user_id={self.user_id}, chat_id={self.chat_id}, tag='{self.tag_text}', expires_at={self.expires_at})>"

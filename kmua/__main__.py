@@ -74,10 +74,21 @@ async def init_bot(client: Client = client):
             BotCommand("dice_stats", "📚 查看提问统计"),
             # Music search
             BotCommand("ms", "🎵 搜索音乐"),
+            # Leaderboard
+            BotCommand("rank", "🏆 查看积分排行榜"),
+            # Tag
+            BotCommand("settag", "🏷 购买/续费个人标签 (100积分/月)"),
+            BotCommand("mytag", "🏷 查看我的标签状态"),
         ]
     )
     common.jobqueue.add_daily_job("cleanup", jobs.cleanup, hour=4)
+    common.jobqueue.add_daily_job("tag_expiry_check", jobs.check_tag_expiry, hour=10)
     common.jobqueue.start()
+
+    # 恢复待提问状态（5分钟内）
+    from kmua.plugins.dice_game import restore_pending_questions
+    await restore_pending_questions()
+
     logger.success(i18n.t("log.inited", locale=app_config.lang))
 
 

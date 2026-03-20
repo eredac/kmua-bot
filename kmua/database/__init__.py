@@ -5,3 +5,7 @@ from .quote import *  # noqa
 from .bottle import *  # noqa
 from .dealer_mode import *  # noqa
 from .question_reference import *  # noqa
+from .points import *  # noqa
+from .checkin import *  # noqa
+from .pending_state import *  # noqa
+from .tags import *  # noqa

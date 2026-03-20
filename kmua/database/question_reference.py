@@ -31,7 +31,7 @@ async def add_question_reference(
     )
 
     session.add(question)
-    await session.commit()
+    await session.flush()
     await session.refresh(question)
     return question
 
@@ -123,7 +123,6 @@ async def increment_question_used_count(
         .values(used_count=QuestionReference.used_count + 1)
     )
     await session.execute(stmt)
-    await session.commit()
 
 
 @with_session

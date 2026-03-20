@@ -77,7 +77,6 @@ async def upsert_dealer_mode_config(
 
     result = await session.execute(stmt)
     config = result.scalar_one()
-    await session.commit()
     return config
 
 
@@ -95,7 +94,6 @@ async def clear_late_players(
         .values(late_players={})
     )
     await session.execute(stmt)
-    await session.commit()
 
 
 @with_tx
@@ -139,7 +137,6 @@ async def add_late_player(
         .values(late_players=late_players)
     )
     await session.execute(stmt)
-    await session.commit()
 
 
 @with_session

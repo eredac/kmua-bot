@@ -12,6 +12,7 @@ from pyrogram.types import (
 
 from kmua import common, consts, database, i18n
 from kmua.logger import logger
+from kmua.plugins.dice_game import handle_ask_deeplink
 
 
 class PrivateStartBotMarkup:
@@ -59,11 +60,19 @@ async def start(client: Client, message: Message):
         return
     cmd = message.command[1]
     if cmd.startswith("inline_query"):
+        user = message.from_user
+        all_points = await database.get_all_user_points(user.id)
+        if not all_points:
+            points_text = "暂无积分记录"
+        else:
+            lines = "\n".join(f"• {p.chat_id}：{p.points} 分" for p in all_points)
+            points_text = f"💰 各群积分：\n{lines}"
         await message.reply(
-            text=i18n.t("bot.msg.help_inline", locale=lang).format(
-                me_username=client.me.username
-            )
+            text=f"👤 你的 ID：<code>{user.id}</code>\n\n{points_text}",
+            parse_mode=ParseMode.HTML,
         )
+    elif cmd.startswith("ask_"):
+        await handle_ask_deeplink(client, message, cmd)
     elif cmd.startswith("seek_bottle"):
         if len(cmd.split("_")) != 3:
             await message.reply(

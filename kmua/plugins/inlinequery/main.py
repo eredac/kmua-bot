@@ -1,168 +1,83 @@
 import asyncio
-from io import BytesIO
+import random
 
 from pyrogram import enums, types
 from pyrogram.client import Client
 
 from kmua import database, i18n
-from kmua.common.memory_store import memttlcache
 from kmua.logger import logger
-from kmua.plugins.inlinequery.manomeme import handle_manomeme
 
-from . import hack, manomeme
-from .quote import query_quote
+from . import hack
+
+# Telegram 🎰 每轮符号：index 0-3 对应 BAR / 🍇 / 🍋 / 7️⃣
+_SLOT_SYMBOLS = ["BAR", "🍇", "🍋", "7️⃣"]
+_SLOT_POINTS_MAP = {64: 50, 1: 30, 22: 15, 43: 5}  # 其余均为 1 分
+_SLOT_MAX_DAILY = 3
+_AUTO_DELETE_DELAY = 60  # 结果消息自动删除延迟（秒）
+
+
+def _decode_slot_pattern(value: int) -> str:
+    """将 Telegram 🎰 点数（1-64）解码为三轮图案字符串"""
+    idx = value - 1
+    r1 = _SLOT_SYMBOLS[idx % 4]
+    r2 = _SLOT_SYMBOLS[(idx // 4) % 4]
+    r3 = _SLOT_SYMBOLS[(idx // 16) % 4]
+    return f"[ {r1} | {r2} | {r3} ]"
+
+
+async def _delete_after(client: Client, chat_id: int, message_id: int, delay: int):
+    await asyncio.sleep(delay)
+    try:
+        await client.delete_messages(chat_id, message_id)
+    except Exception as e:
+        logger.warning(f"Auto-delete inline message failed: {e}")
 
 
 @Client.on_inline_query()
 async def inline_query_handler(client: Client, query: types.InlineQuery):
     user = query.from_user
     user_config = await database.get_user_config(user)
-    datas = query.query.strip().split(" ")
-    if not datas or datas[0] == "":
-        results: list[types.InlineQueryResult] = []
-        if query.chat_type == enums.ChatType.SUPERGROUP:
-            results.append(
-                types.InlineQueryResultArticle(
-                    id="chat_quotes",
-                    title=i18n.t(
-                        "bot.inline.chat_quotes_title", locale=user_config.lang
-                    ),
-                    description=i18n.t(
-                        "bot.inline.chat_quotes_description", locale=user_config.lang
-                    ),
-                    input_message_content=types.InputTextMessageContent(
-                        message_text=i18n.t(
-                            "bot.inline.chat_quotes_quering", locale=user_config.lang
-                        ),
-                    ),
-                    reply_markup=types.InlineKeyboardMarkup(
-                        [
-                            [
-                                types.InlineKeyboardButton(
-                                    text=i18n.t(
-                                        "bot.inline.chat_quotes_button_noop",
-                                        locale=user_config.lang,
-                                    ),
-                                    callback_data="noop",
-                                )
-                            ]
-                        ]
-                    ),
-                )
-            )
-        else:
-            results.append(
-                types.InlineQueryResultArticle(
-                    id="quotes",
-                    title=i18n.t("bot.inline.quotes_title", locale=user_config.lang),
-                    description=i18n.t(
-                        "bot.inline.quotes_description", locale=user_config.lang
-                    ),
-                    input_message_content=types.InputTextMessageContent(
-                        message_text=i18n.t(
-                            "bot.inline.quotes_message", locale=user_config.lang
-                        ),
-                    ),
-                    reply_markup=types.InlineKeyboardMarkup(
-                        [
-                            [
-                                types.InlineKeyboardButton(
-                                    text=i18n.t(
-                                        "bot.inline.quotes_button",
-                                        locale=user_config.lang,
-                                    ),
-                                    switch_inline_query_current_chat="q ",
-                                )
-                            ]
-                        ]
-                    ),
-                )
-            )
-        results.append(
-            types.InlineQueryResultArticle(
-                id="pick_bottle",
-                title=i18n.t("bot.inline.pick_bottle_title", locale=user_config.lang),
-                description=i18n.t(
-                    "bot.inline.pick_bottle_description", locale=user_config.lang
-                ),
-                input_message_content=types.InputTextMessageContent(
-                    message_text=i18n.t(
-                        "bot.inline.pick_bottle_quering", locale=user_config.lang
-                    ),
-                ),
-                reply_markup=types.InlineKeyboardMarkup(
-                    [
-                        [
-                            types.InlineKeyboardButton(
-                                text=i18n.t(
-                                    "bot.inline.resolve_button_noop",
-                                    locale=user_config.lang,
-                                ),
-                                callback_data="noop",
-                            )
-                        ]
-                    ]
-                ),
-            )
-        )
-        results.append(
-            types.InlineQueryResultArticle(
-                title="魔裁 MEME",
-                description="魔法少女的魔女审判相关 MEME 生成",
-                input_message_content=types.InputTextMessageContent(
-                    message_text="""
-魔裁 MEME 生成器, 用法:
+    results: list[types.InlineQueryResult] = []
 
-1. 安安说: ms anan [表情] [文本]
-示例: ms anan 无语 吾辈现在不想说话
-2. 辩论: ms trial [角色] ([类型] 文本...)
-示例: ms trial 希罗 [伪证] 我当时睡得可香了
-"""
+    if query.chat_type == enums.ChatType.SUPERGROUP:
+        results.append(
+            types.InlineQueryResultArticle(
+                id="daily_checkin",
+                title="📅 每日签到",
+                description="固定获得 5 积分（每天限一次）",
+                input_message_content=types.InputTextMessageContent(
+                    message_text="⏳ 正在签到...",
                 ),
                 reply_markup=types.InlineKeyboardMarkup(
-                    [
-                        [
-                            types.InlineKeyboardButton(
-                                text="安安说",
-                                switch_inline_query_current_chat="ms anan ",
-                            ),
-                            types.InlineKeyboardButton(
-                                text="辩论",
-                                switch_inline_query_current_chat="ms trial ",
-                            ),
-                        ]
-                    ]
+                    [[types.InlineKeyboardButton(text="⏳", callback_data="noop")]]
                 ),
             )
         )
-        await query.answer(
-            results=results,
-            switch_pm_text=i18n.t("bot.inline.switch_pm_text"),
-            switch_pm_parameter="inline_query",
+        results.append(
+            types.InlineQueryResultArticle(
+                id="slot_checkin",
+                title="🎰 老虎机签到",
+                description="摇老虎机获得随机积分（每天最多 3 次）",
+                input_message_content=types.InputTextMessageContent(
+                    message_text="🎰 老虎机启动中...",
+                ),
+                reply_markup=types.InlineKeyboardMarkup(
+                    [[types.InlineKeyboardButton(text="🎰", callback_data="noop")]]
+                ),
+            )
         )
-        return
-    if datas[0].startswith("q"):
-        # quotes
-        q_data = datas[0].split("_")
-        text = " ".join(datas[1:])
-        if len(q_data) > 1:
-            try:
-                chat_id = int(q_data[1])
-            except ValueError:
-                chat_id = None
-            await query_quote(client, query, chat_id, text)
-            return
-        await query_quote(client, query, text=text)
-    elif datas[0].startswith("ms"):
-        # manosaba memes
-        datas = datas[1:]
-        await handle_manomeme(client, query, datas)
+
+    await query.answer(
+        results=results,
+        switch_pm_text=i18n.t("bot.inline.switch_pm_text", locale=user_config.lang),
+        switch_pm_parameter="inline_query",
+    )
 
 
 @Client.on_chosen_inline_result()
 async def chosen_inline_result(client: Client, result: types.ChosenInlineResult):
     user = result.from_user
-    user_config = await database.get_user_config(user)
+    logger.info(f"chosen_inline_result: result_id={result.result_id}, inline_message_id={result.inline_message_id!r}, user={user.id}")
     info = None
     try:
         info = hack.resolve_inline_message_id(result.inline_message_id)
@@ -171,178 +86,101 @@ async def chosen_inline_result(client: Client, result: types.ChosenInlineResult)
     if info is None:
         await client.edit_inline_text(
             inline_message_id=result.inline_message_id,
-            text=i18n.t("bot.inline.resolve_error", locale=user_config.lang),
+            text="解析消息失败了呢，请稍后再试",
         )
         return
-    if result.result_id == "chat_quotes":
-        await client.edit_inline_text(
-            inline_message_id=result.inline_message_id,
-            text=i18n.t("bot.inline.chat_quotes_success", locale=user_config.lang),
-            reply_markup=types.InlineKeyboardMarkup(
-                [
-                    [
-                        types.InlineKeyboardButton(
-                            switch_inline_query_current_chat=f"q_{info.chat_id} ",
-                            text=i18n.t(
-                                "bot.inline.chat_quotes_button",
-                                locale=user_config.lang,
-                            ),
-                        )
-                    ]
-                ]
-            ),
-        )
-        return
-    elif result.result_id == "pick_bottle":
-        lang = user_config.lang
-        chat = await database.get_chat_by_id(info.chat_id)
-        if chat is not None:
-            lang = chat.chat_config.lang
-            if not chat.chat_config.pick_bottle_enabled:
-                await client.edit_inline_text(
-                    inline_message_id=result.inline_message_id,
-                    text=i18n.t(
-                        "bot.msg.bottle.pick_disabled_in_chat",
-                        locale=lang,
-                    ),
-                )
-                return
-        bottle = await database.pick_random_bottle()
-        if bottle is None:
-            await client.edit_inline_text(
-                inline_message_id=result.inline_message_id,
-                text=i18n.t("bot.msg.bottle.no_bottles", locale=user_config.lang),
-            )
-            return
-        bot_username = client.me.username if client.me else None
 
-        row1 = [
-            types.InlineKeyboardButton(
-                i18n.t("bot.button.bottle.throw_back", locale=lang),
-                callback_data=f"throw_back {user.id}",
-            )
-        ]
-        if bottle.sender_id == user.id:
-            row1.append(
-                types.InlineKeyboardButton(
-                    i18n.t("bot.button.bottle.destroy", locale=lang),
-                    callback_data=f"destroy_bottle {bottle.id} {user.id}",
-                ),
-            )
-        buttons = [
-            [
-                types.InlineKeyboardButton(
-                    i18n.t("bot.button.bottle.report", locale=lang),
-                    callback_data=f"report_bottle {bottle.id}",
-                ),
-                types.InlineKeyboardButton(
-                    i18n.t("bot.button.bottle.seek", locale=lang),
-                    url=f"https://t.me/{bot_username}?start=seek_bottle_{bottle.id}",
-                ),
-            ],
-        ]
-        if bottle.media_type is not None and bottle.file_id is not None:
-            try:
-                media = None
-                match bottle.media_type:
-                    case enums.MessageMediaType.PHOTO.name:
-                        media = types.InputMediaPhoto(
-                            media=bottle.file_id, caption=bottle.text
-                        )
-                    case enums.MessageMediaType.VIDEO.name:
-                        media = types.InputMediaVideo(
-                            media=bottle.file_id, caption=bottle.text
-                        )
-                    case enums.MessageMediaType.AUDIO.name:
-                        media = types.InputMediaAudio(
-                            media=bottle.file_id, caption=bottle.text
-                        )
-                    case enums.MessageMediaType.DOCUMENT.name:
-                        media = types.InputMediaDocument(
-                            media=bottle.file_id, caption=bottle.text
-                        )
-                    case enums.MessageMediaType.ANIMATION.name:
-                        media = types.InputMediaAnimation(
-                            media=bottle.file_id, caption=bottle.text
-                        )
-                if media is not None:
-                    await client.edit_inline_media(
-                        inline_message_id=result.inline_message_id,
-                        media=media,
-                        reply_markup=types.InlineKeyboardMarkup(buttons),
-                    )
-                    return
-            except Exception as e:
-                logger.exception(f"Failed to edit inline media: {e}")
-        await client.edit_inline_text(
-            inline_message_id=result.inline_message_id,
-            text=bottle.text,
-            reply_markup=types.InlineKeyboardMarkup(buttons),
-        )
-        return
-    elif result.result_id.startswith("ms_"):
-        dataid = result.result_id.split("_")[1]
-        data: dict | None = await memttlcache.get(f"manomeme_inline:{dataid}")
-        if data is None:
+    try:
+        await _handle_checkin(client, result, user, info)
+    except Exception as e:
+        logger.exception(f"chosen_inline_result error: {e}")
+
+
+async def _handle_checkin(client, result, user, info):
+    safe_name = (
+        user.first_name
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    mention = f'<a href="tg://user?id={user.id}">{safe_name}</a>'
+
+    if result.result_id == "daily_checkin":
+        if await database.has_any_checkin_today(user.id, info.chat_id):
             await client.edit_inline_text(
                 inline_message_id=result.inline_message_id,
-                text="查询过期了呢, 请重新生成",
+                text="⚠️ 今天已经签到过了哦～",
+            )
+            asyncio.create_task(
+                _delete_after(client, info.chat_id, info.message_id, _AUTO_DELETE_DELAY)
             )
             return
-        match data["type"]:
-            case "anan":
-                face = data.get("face", "无语")
-                text = data.get("text", "吾辈现在不想说话")
-                try:
-                    image_bytes = await asyncio.to_thread(
-                        manomeme.draw_anan, text, face
-                    )
-                    media = BytesIO(image_bytes)
-                    media.name = "anan.png"
-                    await client.edit_inline_media(
-                        inline_message_id=result.inline_message_id,
-                        media=types.InputMediaPhoto(media=media),
-                        reply_markup=types.InlineKeyboardMarkup(
-                            [
-                                [
-                                    types.InlineKeyboardButton(
-                                        text="安安说",
-                                        switch_inline_query_current_chat=f"ms anan {face} ",
-                                    )
-                                ]
-                            ]
-                        ),
-                    )
-                except Exception as e:
-                    logger.exception(f"Failed to edit inline media: {e}")
-                    await client.edit_inline_text(
-                        inline_message_id=result.inline_message_id,
-                        text="生成图片失败了呢, 请稍后再试",
-                    )
-                return
-            case "trial":
-                character = data.get("character", manomeme.Character.EMA)
-                options = data.get("options", [])
-                if not options:
-                    await client.edit_inline_text(
-                        inline_message_id=result.inline_message_id,
-                        text="没有有效的选项呢, 请重新生成",
-                    )
-                    return
-                try:
-                    image_bytes = await asyncio.to_thread(
-                        manomeme.draw_trial, character, options
-                    )
-                    media = BytesIO(image_bytes)
-                    media.name = "trial.png"
-                    await client.edit_inline_media(
-                        inline_message_id=result.inline_message_id,
-                        media=types.InputMediaPhoto(media=media),
-                    )
-                except Exception as e:
-                    logger.exception(f"Failed to edit inline media: {e}")
-                    await client.edit_inline_text(
-                        inline_message_id=result.inline_message_id,
-                        text="生成图片失败了呢, 请稍后再试",
-                    )
-                return
+        user_points = await database.record_checkin_and_add_points(
+            user.id, info.chat_id, "daily", 5
+        )
+        await client.edit_inline_text(
+            inline_message_id=result.inline_message_id,
+            text=(
+                f"✅ {mention} 签到成功！\n\n"
+                f"获得积分：<b>+5</b>\n"
+                f"当前积分：<b>{user_points.points}</b>"
+            ),
+            parse_mode=enums.ParseMode.HTML,
+        )
+        asyncio.create_task(
+            _delete_after(client, info.chat_id, info.message_id, _AUTO_DELETE_DELAY)
+        )
+
+    elif result.result_id == "slot_checkin":
+        daily_count = await database.get_checkin_count_today(user.id, info.chat_id, "daily")
+        if daily_count >= 1:
+            await client.edit_inline_text(
+                inline_message_id=result.inline_message_id,
+                text="⚠️ 今天已经进行过普通签到了，不能再摇老虎机啦～",
+            )
+            asyncio.create_task(
+                _delete_after(client, info.chat_id, info.message_id, _AUTO_DELETE_DELAY)
+            )
+            return
+        slot_count = await database.get_checkin_count_today(user.id, info.chat_id, "slot")
+        if slot_count >= _SLOT_MAX_DAILY:
+            await client.edit_inline_text(
+                inline_message_id=result.inline_message_id,
+                text=f"⚠️ 今天老虎机已用完 {_SLOT_MAX_DAILY} 次啦～",
+            )
+            asyncio.create_task(
+                _delete_after(client, info.chat_id, info.message_id, _AUTO_DELETE_DELAY)
+            )
+            return
+        value = random.randint(1, 64)
+        points = _SLOT_POINTS_MAP.get(value, 1)
+        pattern = _decode_slot_pattern(value)
+        user_points = await database.record_checkin_and_add_points(
+            user.id, info.chat_id, "slot", points
+        )
+        remaining = _SLOT_MAX_DAILY - slot_count - 1
+        if points == 50:
+            prize_text = "🎉 <b>超级大奖！</b> 777！"
+        elif points == 30:
+            prize_text = "🌟 <b>大奖！</b> BAR BAR BAR！"
+        elif points == 15:
+            prize_text = "✨ <b>不错！</b> 三葡萄！"
+        elif points == 5:
+            prize_text = "👍 <b>小奖！</b> 三柠檬！"
+        else:
+            prize_text = "😅 <b>安慰奖</b>"
+        await client.edit_inline_text(
+            inline_message_id=result.inline_message_id,
+            text=(
+                f"🎰 {mention} 的老虎机结果：\n\n"
+                f"{pattern}\n\n"
+                f"{prize_text}\n"
+                f"获得积分：<b>+{points}</b>\n"
+                f"当前积分：<b>{user_points.points}</b>\n"
+                f"今日剩余次数：<b>{remaining}</b>"
+            ),
+            parse_mode=enums.ParseMode.HTML,
+        )
+        asyncio.create_task(
+            _delete_after(client, info.chat_id, info.message_id, _AUTO_DELETE_DELAY)
+        )

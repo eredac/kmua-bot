@@ -28,6 +28,10 @@ from kmua.database import (
     get_random_question,
     get_top_questions,
     increment_question_used_count,
+    upsert_pending_question,
+    delete_pending_question,
+    load_valid_pending_questions,
+    cleanup_expired_pending_questions,
 )
 
 # 加载配置
@@ -254,6 +258,25 @@ async def end_game(client: Client, game_key: tuple, reason: str) -> None:
         # 处理平局情况
         min_roll = loser.min_roll
         max_roll = winner.min_roll
+
+        # 检测全部平局（所有人点数相同）
+        if min_roll == max_roll:
+            # 全部平局，无法分出提问方和回答方
+            all_player_mentions = [safe_mention(p) for p in players_sorted]
+            await client.send_message(
+                chat_id,
+                "🎲 <b>游戏结束</b> 🎲\n\n"
+                f"原因: {reason}\n"
+                f"参与人数: {player_count}\n\n"
+                f"🤝 <b>全部平局</b> (点数 {min_roll})\n"
+                f"参与者: {'、'.join(all_player_mentions)}\n\n"
+                f"💡 所有人点数相同，请重新开始游戏！",
+                parse_mode=ParseMode.HTML,
+                message_thread_id=thread_id,
+            )
+            logger.info(f"游戏结束 (chat_id={chat_id}, thread={thread_id}): 全部平局 (点数={min_roll})")
+            return
+
         losers = [p for p in players_sorted if p.min_roll == min_roll]
         winners = [p for p in players_sorted if p.min_roll == max_roll]
 
@@ -270,17 +293,15 @@ async def end_game(client: Client, game_key: tuple, reason: str) -> None:
         # 构建提问方和回答方文本
         if len(winners) > 1:
             winner_text = "、".join(safe_mention(w) for w in winners)
-            winner_section = f"👑 <b>提问方</b> (点数 {max_roll}, 平局):\n{winner_text}"
-            has_single_winner = False
+            winner_section = f"👑 <b>提问方</b> (点数 {max_roll}, {len(winners)}人并列):\n{winner_text}"
         else:
             winner_section = f"👑 <b>提问方</b> (点数 {max_roll}):\n{safe_mention(winner)}"
-            has_single_winner = True
 
         # 构建回答方文本（区分迟到玩家）
         all_loser_mentions = normal_loser_mentions + late_loser_mentions
         if len(losers) > 1:
             loser_text = "、".join(all_loser_mentions)
-            loser_section = f"🎯 <b>回答方</b> (点数 {min_roll}, 平局):\n{loser_text}"
+            loser_section = f"🎯 <b>回答方</b> (点数 {min_roll}, {len(losers)}人并列):\n{loser_text}"
         else:
             loser_text = all_loser_mentions[0]
             loser_section = f"🎯 <b>回答方</b> (点数 {min_roll}):\n{loser_text}"
@@ -297,42 +318,43 @@ async def end_game(client: Client, game_key: tuple, reason: str) -> None:
             f"{late_hint}"
         )
 
-        # 如果只有一个提问方，生成提问按钮
+        # 生成提问按钮（所有提问方共用一个按钮）
         keyboard = None
-        if has_single_winner:
-            # 获取 bot 用户名
-            bot_me = await client.get_me()
-            bot_username = bot_me.username
+        # 获取 bot 用户名
+        bot_me = await client.get_me()
+        bot_username = bot_me.username
 
-            # 保存待提问数据
+        # 为每个提问方保存待提问数据（用于鉴权）
+        timestamp = time.time()
+        for winner_player in winners:
             async with _questions_lock:
-                _pending_questions[winner.user_id] = PendingQuestion(
+                _pending_questions[winner_player.user_id] = PendingQuestion(
                     chat_id=chat_id,
                     thread_id=thread_id,
-                    winner_id=winner.user_id,
+                    winner_id=winner_player.user_id,
                     loser_ids=[l.user_id for l in losers],
-                    winner_mentions=[safe_mention(winner)],
+                    winner_mentions=[safe_mention(winner_player)],
                     loser_mentions=[safe_mention(l) for l in losers],
-                    timestamp=time.time(),
+                    timestamp=timestamp,
                 )
 
-            # 生成深度链接按钮
-            deep_link = f"https://t.me/{bot_username}?start=ask_{winner.user_id}_{int(time.time())}"
+        # 生成统一的深度链接（使用第一个提问方的ID，鉴权时会检查所有提问方）
+        deep_link = f"https://t.me/{bot_username}?start=ask_{chat_id}_{int(timestamp)}"
 
-            # 构建按钮布局
-            buttons = [
-                [InlineKeyboardButton("💬 开始提问", url=deep_link)],
-            ]
+        # 构建按钮布局
+        buttons = [
+            [InlineKeyboardButton("💬 开始提问", url=deep_link)],
+        ]
 
-            # 检查是否有历史提问，如果有则添加参考按钮
-            question_count = await get_question_count(chat_id)
-            if question_count > 0:
-                buttons.append([
-                    InlineKeyboardButton("🎲 随机提问", callback_data=f"random_q_{chat_id}"),
-                    InlineKeyboardButton("📚 提问参考", callback_data=f"top_q_{chat_id}"),
-                ])
+        # 暂时隐藏参考提问按钮
+        # question_count = await get_question_count(chat_id)
+        # if question_count > 0:
+        #     buttons.append([
+        #         InlineKeyboardButton("🎲 随机提问", callback_data=f"random_q_{chat_id}"),
+        #         InlineKeyboardButton("📚 提问参考", callback_data=f"top_q_{chat_id}"),
+        #     ])
 
-            keyboard = InlineKeyboardMarkup(buttons)
+        keyboard = InlineKeyboardMarkup(buttons)
 
         await client.send_message(
             chat_id,
@@ -808,77 +830,59 @@ async def dice_message_handler(client: Client, message: Message):
 _waiting_for_question: Dict[int, PendingQuestion] = {}
 
 
-@Client.on_message(filters.command("start") & filters.private, group=0)
-async def start_command_handler(client: Client, message: Message):
-    """处理 /start 命令（深度链接）"""
+async def restore_pending_questions():
+    """重启后从 DB 恢复5分钟内的待提问状态（由 init_bot 调用）"""
+    try:
+        pending_map = await load_valid_pending_questions()
+        _waiting_for_question.update(pending_map)
+        if pending_map:
+            logger.info(f"已恢复 {len(pending_map)} 个待提问状态")
+        await cleanup_expired_pending_questions()
+    except Exception as e:
+        logger.warning(f"加载待提问状态失败: {e}")
+
+
+async def handle_ask_deeplink(client: Client, message: Message, param: str) -> bool:
+    """处理 ask_ 深度链接，返回 True 表示已处理"""
     user = message.from_user
     if not user:
-        return
+        return False
+    try:
+        parts = param.split("_")
+        chat_id_from_link = int(parts[1])
+        timestamp_from_link = int(parts[2])
 
-    # 解析参数
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        # 普通 /start 命令
-        await message.reply_text(
-            "👋 你好！我是真心话大冒险机器人。\n\n"
-            "请在群组中使用 /dice 发起游戏。"
-        )
-        return
+        async with _questions_lock:
+            pending = _pending_questions.get(user.id)
 
-    param = parts[1]
-    
-    # 处理提问深度链接
-    if param.startswith("ask_"):
-        try:
-            parts = param.split("_")
-            winner_id = int(parts[1])
-            
-            # 验证是否是提问方
-            if user.id != winner_id:
-                await message.reply_text(
-                    "⚠️ 你不是提问方，无法提问。"
-                )
-                return
-            
-            # 检查是否有待提问数据
+        if not pending:
+            await message.reply_text("⚠️ 你不是提问方，无法提问。")
+            return True
+
+        if pending.chat_id != chat_id_from_link or abs(pending.timestamp - timestamp_from_link) > 1:
+            await message.reply_text("⚠️ 提问链接无效或已过期。")
+            return True
+
+        if time.time() - pending.timestamp > 86400:
             async with _questions_lock:
-                pending = _pending_questions.get(winner_id)
-            
-            if not pending:
-                await message.reply_text(
-                    "⚠️ 提问已过期或无效。"
-                )
-                return
-            
-            # 检查是否过期（24小时）
-            if time.time() - pending.timestamp > 86400:
-                async with _questions_lock:
-                    _pending_questions.pop(winner_id, None)
-                await message.reply_text(
-                    "⚠️ 提问已过期（超过24小时）。"
-                )
-                return
-            
-            # 标记用户正在等待输入提问
-            _waiting_for_question[user.id] = pending
-            
-            # 提示用户输入提问
-            loser_names = "、".join([m.replace('<a href="tg://user?id=', '').replace('">', ' ').replace('</a>', '') for m in pending.loser_mentions])
-            
-            await message.reply_text(
-                "💬 <b>请输入你的提问</b>\n\n"
-                f"回答方: {', '.join(pending.loser_mentions)}\n\n"
-                "请直接发送你的提问内容（文本、图片、视频等）",
-                parse_mode=ParseMode.HTML,
-            )
-            
-            logger.info(f"用户 {user.first_name}(id={user.id}) 开始提问")
-            
-        except (ValueError, IndexError) as e:
-            logger.error(f"解析深度链接失败: {param}, 错误: {e}")
-            await message.reply_text(
-                "⚠️ 链接格式错误。"
-            )
+                _pending_questions.pop(user.id, None)
+            await message.reply_text("⚠️ 提问已过期（超过24小时）。")
+            return True
+
+        _waiting_for_question[user.id] = pending
+        asyncio.create_task(upsert_pending_question(user.id, pending))
+        await message.reply_text(
+            "💬 <b>请输入你的提问</b>\n\n"
+            f"回答方: {', '.join(pending.loser_mentions)}\n\n"
+            "请直接发送你的提问内容（文本、图片、视频等）",
+            parse_mode=ParseMode.HTML,
+        )
+        logger.info(f"用户 {user.first_name}(id={user.id}) 开始提问")
+        return True
+    except (ValueError, IndexError) as e:
+        logger.error(f"解析深度链接失败: {param}, 错误: {e}")
+        await message.reply_text("⚠️ 链接格式错误。")
+        return True
 
 
 @Client.on_message(filters.private & ~filters.command(["start", "dice_end", "dice_status", "dealer"]), group=2)
@@ -895,6 +899,7 @@ async def private_question_handler(client: Client, message: Message):
 
     # 移除等待状态
     _waiting_for_question.pop(user.id, None)
+    asyncio.create_task(delete_pending_question(user.id))
 
     # 移除待提问数据
     async with _questions_lock:
@@ -910,7 +915,7 @@ async def private_question_handler(client: Client, message: Message):
 
         # 如果是文本消息，直接附加
         if message.text:
-            question_text += message.text
+            question_text += message.text.html
             await client.send_message(
                 pending.chat_id,
                 question_text,
@@ -919,7 +924,7 @@ async def private_question_handler(client: Client, message: Message):
             )
         elif message.caption:
             # 如果是带标题的媒体消息
-            question_text += message.caption
+            question_text += message.caption.html
             # 转发媒体
             if message.photo:
                 await client.send_photo(

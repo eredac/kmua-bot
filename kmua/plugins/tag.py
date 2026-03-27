@@ -21,6 +21,7 @@ from kmua.database.db import AsyncSessionFactory
 from kmua.logger import logger
 
 _TAG_COST = 100          # 每次购买/续费消耗的积分
+_EDIT_TAG_COST = 50      # 仅修改标签文字消耗的积分
 _TAG_DURATION_DAYS = 30  # 标签有效期（天）
 _MAX_TAG_LEN = 16        # 标签最大字符数
 _AUTO_DELETE_DELAY = 30  # 成功/错误回复的自动删除延迟（秒）
@@ -28,10 +29,14 @@ _AUTO_DELETE_DELAY = 30  # 成功/错误回复的自动删除延迟（秒）
 _TZ_CST = datetime.timezone(datetime.timedelta(hours=8))
 
 
-async def _auto_delete(msg: Message, delay: int = _AUTO_DELETE_DELAY) -> None:
+async def _auto_delete(*msgs: Message, delay: int = _AUTO_DELETE_DELAY) -> None:
     try:
         await asyncio.sleep(delay)
-        await msg.delete()
+        for msg in msgs:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
     except Exception as e:
         logger.debug(f"自动删除标签消息失败: {e}")
 
@@ -77,7 +82,7 @@ async def settag_handler(client: Client, message: Message) -> None:
             "💡 用法：<code>/settag 你的标签</code>（最多 16 个字符）",
             parse_mode=ParseMode.HTML,
         )
-        asyncio.create_task(_auto_delete(reply))
+        asyncio.create_task(_auto_delete(message, reply))
         return
 
     tag_text = args[1].strip()
@@ -85,7 +90,7 @@ async def settag_handler(client: Client, message: Message) -> None:
         reply = await message.reply_text(
             f"⚠️ 标签文字不能超过 {_MAX_TAG_LEN} 个字符（当前 {len(tag_text)} 个）",
         )
-        asyncio.create_task(_auto_delete(reply))
+        asyncio.create_task(_auto_delete(message, reply))
         return
 
     # 检查用户积分是否充足
@@ -97,7 +102,7 @@ async def settag_handler(client: Client, message: Message) -> None:
             f"当前积分：<b>{current_points}</b>",
             parse_mode=ParseMode.HTML,
         )
-        asyncio.create_task(_auto_delete(reply))
+        asyncio.create_task(_auto_delete(message, reply))
         return
 
     # 判断是新购还是续费：
@@ -130,7 +135,7 @@ async def settag_handler(client: Client, message: Message) -> None:
                 )
     except ValueError as e:
         reply = await message.reply_text(f"⚠️ {e}")
-        asyncio.create_task(_auto_delete(reply))
+        asyncio.create_task(_auto_delete(message, reply))
         return
 
     # 调用 Bot API 9.5 setChatMemberTag
@@ -151,7 +156,7 @@ async def settag_handler(client: Client, message: Message) -> None:
         f"💰 剩余积分：<b>{updated_points.points}</b>",
         parse_mode=ParseMode.HTML,
     )
-    asyncio.create_task(_auto_delete(reply))
+    asyncio.create_task(_auto_delete(message, reply))
     logger.info(
         f"用户标签{action}: user={user_id}, chat={chat_id}, "
         f"tag='{tag_text}', expires={tag.expires_at}"
@@ -188,7 +193,7 @@ async def mytag_handler(client: Client, message: Message) -> None:
             f"发送 <code>/settag 你的标签</code> 花费 <b>{_TAG_COST} 积分</b>购买（有效期 30 天）",
             parse_mode=ParseMode.HTML,
         )
-        asyncio.create_task(_auto_delete(reply))
+        asyncio.create_task(_auto_delete(message, reply))
         return
 
     if db_tag is None:
@@ -199,7 +204,7 @@ async def mytag_handler(client: Client, message: Message) -> None:
             f"发送 <code>/settag {display_tag_text}</code> 可将其纳入 bot 管理（{_TAG_COST} 积分/月）",
             parse_mode=ParseMode.HTML,
         )
-        asyncio.create_task(_auto_delete(reply))
+        asyncio.create_task(_auto_delete(message, reply))
         return
 
     # 有数据库计费记录
@@ -227,4 +232,85 @@ async def mytag_handler(client: Client, message: Message) -> None:
             f"发送 <code>/settag 新标签</code> 可续费或修改标签（{_TAG_COST} 积分/月）",
             parse_mode=ParseMode.HTML,
         )
-    asyncio.create_task(_auto_delete(reply))
+    asyncio.create_task(_auto_delete(message, reply))
+
+
+@Client.on_message(filters.command("edittag") & filters.group, group=0)
+async def edittag_handler(client: Client, message: Message) -> None:
+    """处理 /edittag <标签文字> 命令，仅修改标签内容，不改变到期时间，花费 50 积分"""
+    user = message.from_user
+    if not user:
+        return
+
+    chat_id = message.chat.id
+    user_id = user.id
+
+    # 解析标签文字
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2 or not args[1].strip():
+        reply = await message.reply_text(
+            f"💡 用法：<code>/edittag 新标签内容</code>（最多 {_MAX_TAG_LEN} 个字符，花费 {_EDIT_TAG_COST} 积分）",
+            parse_mode=ParseMode.HTML,
+        )
+        asyncio.create_task(_auto_delete(message, reply))
+        return
+
+    tag_text = args[1].strip()
+    if len(tag_text) > _MAX_TAG_LEN:
+        reply = await message.reply_text(
+            f"⚠️ 标签文字不能超过 {_MAX_TAG_LEN} 个字符（当前 {len(tag_text)} 个）",
+        )
+        asyncio.create_task(_auto_delete(message, reply))
+        return
+
+    # 检查积分是否充足
+    user_points = await database.get_user_points(user_id, chat_id)
+    current_points = user_points.points if user_points else 0
+    if current_points < _EDIT_TAG_COST:
+        reply = await message.reply_text(
+            f"⚠️ 积分不足！修改标签需要 <b>{_EDIT_TAG_COST}</b> 积分，"
+            f"当前积分：<b>{current_points}</b>",
+            parse_mode=ParseMode.HTML,
+        )
+        asyncio.create_task(_auto_delete(message, reply))
+        return
+
+    # 原子扣积分 + 仅更新标签文字（同一事务）
+    try:
+        async with AsyncSessionFactory() as session:
+            async with session.begin():
+                updated_points = await database.cost_points(
+                    user_id, chat_id, _EDIT_TAG_COST,
+                    reason="修改个人标签文字",
+                    session=session,
+                )
+                tag = await database.update_tag_text_only(
+                    user_id, chat_id, tag_text, session=session
+                )
+    except ValueError as e:
+        reply = await message.reply_text(f"⚠️ {e}")
+        asyncio.create_task(_auto_delete(message, reply))
+        return
+
+    # 调用 Bot API 9.5 setChatMemberTag 更新 Telegram 侧标签
+    try:
+        await client.set_chat_member_tag(chat_id, user_id, tag=tag_text)
+    except AttributeError:
+        logger.warning("set_chat_member_tag 未被当前客户端库支持，跳过 API 调用")
+    except Exception as e:
+        logger.warning(f"set_chat_member_tag 调用失败: {e}")
+
+    expires_cst = tag.expires_at.replace(tzinfo=datetime.timezone.utc).astimezone(_TZ_CST)
+    expires_str = expires_cst.strftime("%Y-%m-%d %H:%M")
+    reply = await message.reply_text(
+        f"✅ 标签修改成功！\n\n"
+        f"🏷 新标签：<b>{tag_text}</b>\n"
+        f"📅 到期时间：<b>{expires_str}</b>（UTC+8，不变）\n"
+        f"💰 剩余积分：<b>{updated_points.points}</b>",
+        parse_mode=ParseMode.HTML,
+    )
+    asyncio.create_task(_auto_delete(message, reply))
+    logger.info(
+        f"用户标签修改: user={user_id}, chat={chat_id}, "
+        f"new_tag='{tag_text}', expires={tag.expires_at}"
+    )

@@ -22,6 +22,24 @@ def get_checkin_date() -> str:
 
 
 @with_session
+async def get_user_checkin_type_count_today(
+    user_id: int,
+    checkin_type: str,
+    session: AsyncSession | None = None,
+) -> int:
+    """返回用户今日在所有群指定类型的签到总次数（用于 inline query 阶段无 chat_id 的场景）"""
+    assert session is not None
+    today = get_checkin_date()
+    stmt = sqlalchemy.select(sqlalchemy.func.count()).where(
+        DailyCheckIn.user_id == user_id,
+        DailyCheckIn.checkin_date == today,
+        DailyCheckIn.checkin_type == checkin_type,
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one()
+
+
+@with_session
 async def has_any_checkin_today(
     user_id: int,
     chat_id: int,

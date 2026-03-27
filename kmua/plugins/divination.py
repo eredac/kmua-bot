@@ -12,6 +12,8 @@ from loguru import logger
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
+from kmua import database
+
 # ── 资产路径 ──────────────────────────────────────────────
 _PLUGIN_DIR = Path(__file__).parent
 _ASAKUSA_PATH = _PLUGIN_DIR / "Asakusa100.json"
@@ -221,6 +223,8 @@ def _shuffle_draw(lst: list, n: int) -> list:
 @Client.on_message(filters.regex(r"^每日(塔罗|塔羅)"))
 async def tarot_daily_handler(client: Client, message: Message):
     """每日塔罗：抽一张牌，显示牌名及图片"""
+    if not (await database.get_chat_config(message.chat)).divination_enabled:
+        return
     name, img_url = random.choice(_TAROT_LIST)
     caption = f"🔮 **每日塔罗**\n\n{name}"
     try:
@@ -233,6 +237,8 @@ async def tarot_daily_handler(client: Client, message: Message):
 @Client.on_message(filters.regex(r"^(时间|時間)(塔罗|塔羅)"))
 async def tarot_time_handler(client: Client, message: Message):
     """时间塔罗：过去 / 现在 / 未来 三张牌"""
+    if not (await database.get_chat_config(message.chat)).divination_enabled:
+        return
     parts = message.text.split(None, 1)
     topic = f"；{parts[1]}" if len(parts) > 1 else ""
     cards = _shuffle_draw(_TAROT_NAMES, 3)
@@ -248,6 +254,8 @@ async def tarot_time_handler(client: Client, message: Message):
 @Client.on_message(filters.regex(r"^大十字(塔罗|塔羅)"))
 async def tarot_cross_handler(client: Client, message: Message):
     """大十字塔罗：十张牌展开"""
+    if not (await database.get_chat_config(message.chat)).divination_enabled:
+        return
     parts = message.text.split(None, 1)
     topic = f"；{parts[1]}" if len(parts) > 1 else ""
     cards = _shuffle_draw(_TAROT_NAMES, 10)
@@ -270,6 +278,8 @@ async def tarot_cross_handler(client: Client, message: Message):
 @Client.on_message(filters.regex(r"^每日(浅草签|淺草簽)"))
 async def asakusa_handler(client: Client, message: Message):
     """每日浅草签：从百签中随机抽取"""
+    if not (await database.get_chat_config(message.chat)).divination_enabled:
+        return
     if not _ASAKUSA_LIST:
         await message.reply("⚠️ 浅草签数据加载失败，请检查 Asakusa100.json")
         return
@@ -280,6 +290,8 @@ async def asakusa_handler(client: Client, message: Message):
 @Client.on_message(filters.regex(r"(运势|運勢)"))
 async def luck_handler(client: Client, message: Message):
     """运势：为对象随机判断运势等级"""
+    if not (await database.get_chat_config(message.chat)).divination_enabled:
+        return
     args = message.text.split()[1:]  # 去掉触发词本身
     if not args:
         # 无参数时为发送者占卜
@@ -396,6 +408,8 @@ async def _fetch_zodiac(name: str) -> str | None:
 @Client.on_message(filters.regex(_ZODIAC_PATTERN))
 async def zodiac_handler(client: Client, message: Message):
     """每日星座运程"""
+    if not (await database.get_chat_config(message.chat)).divination_enabled:
+        return
     import re
     m = re.search(_ZODIAC_PATTERN, message.text or "")
     if not m:

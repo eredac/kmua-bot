@@ -37,6 +37,9 @@ slash_fliter = filters.create(slash_fliter_func)
 async def slash(client: Client, message: Message):
     if not message.text:
         return
+    chat_config = await database.get_chat_config(message.chat)
+    if not chat_config.slash_enabled:
+        return
     if message.text.startswith("/"):
         if not message.text.startswith("//"):
             if re.match(r"^/[a-zA-Z0-9]+", message.text):

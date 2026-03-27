@@ -190,6 +190,10 @@ async def get_chat_leaderboard(
     return result.scalars().all()
 
 
+# 不参与排行榜的用户 ID（如测试账号）
+_LEADERBOARD_EXCLUDED_USER_IDS: frozenset[int] = frozenset({8142433619})
+
+
 @with_session
 async def get_chat_leaderboard_page(
     chat_id: int,
@@ -204,7 +208,10 @@ async def get_chat_leaderboard_page(
     stmt = (
         sqlalchemy.select(UserPoints, UserData.full_name)
         .join(UserData, UserPoints.user_id == UserData.id)
-        .where(UserPoints.chat_id == chat_id)
+        .where(
+            UserPoints.chat_id == chat_id,
+            UserPoints.user_id.not_in(_LEADERBOARD_EXCLUDED_USER_IDS),
+        )
         .order_by(UserPoints.points.desc())
         .offset(page * page_size)
         .limit(page_size)
@@ -221,7 +228,8 @@ async def get_leaderboard_total(
     """获取群组积分排行榜总人数"""
     assert session is not None
     stmt = sqlalchemy.select(sqlalchemy.func.count()).where(
-        UserPoints.chat_id == chat_id
+        UserPoints.chat_id == chat_id,
+        UserPoints.user_id.not_in(_LEADERBOARD_EXCLUDED_USER_IDS),
     )
     result = await session.execute(stmt)
     return result.scalar_one()

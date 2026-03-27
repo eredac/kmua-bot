@@ -42,9 +42,29 @@ async def upsert_user_tag(
         )
         session.add(tag)
     else:
-        # 续费：始终以当前时间起算，不叠加旧剩余时间
+        # 续费：在当前到期时间基础上叠加，已过期则从 now 起算
+        base = max(tag.expires_at.replace(tzinfo=_TZ_UTC), now)
         tag.tag_text = tag_text
-        tag.expires_at = now + datetime.timedelta(days=duration_days)
+        tag.expires_at = base + datetime.timedelta(days=duration_days)
+    return tag
+
+
+@with_tx
+async def update_tag_text_only(
+    user_id: int,
+    chat_id: int,
+    tag_text: str,
+    session: AsyncSession | None = None,
+) -> UserTag:
+    """仅修改标签文字，不改变到期时间。标签不存在或已过期时抛出 ValueError"""
+    assert session is not None
+    tag = await session.get(UserTag, (user_id, chat_id))
+    if tag is None:
+        raise ValueError("您在本群还没有标签，请先使用 /settag 购买")
+    now = datetime.datetime.now(_TZ_UTC)
+    if tag.expires_at.replace(tzinfo=_TZ_UTC) <= now:
+        raise ValueError("您的标签已过期，请使用 /settag 续费后再修改")
+    tag.tag_text = tag_text
     return tag
 
 

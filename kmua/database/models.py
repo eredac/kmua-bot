@@ -56,6 +56,9 @@ class ChatConfig:
     convert_b23_enabled: bool = True
     parse_artwork_enabled: bool = True
     pick_bottle_enabled: bool = True
+    slash_enabled: bool = True
+    divination_enabled: bool = True
+    checkin_enabled: bool = True
     lang: str = "zh-CN"
 
     @classmethod
@@ -76,6 +79,9 @@ class ChatConfig:
             convert_b23_enabled=data.get("convert_b23_enabled", False),
             parse_artwork_enabled=data.get("parse_artwork_enabled", True),
             pick_bottle_enabled=data.get("pick_bottle_enabled", True),
+            slash_enabled=data.get("slash_enabled", True),
+            divination_enabled=data.get("divination_enabled", True),
+            checkin_enabled=data.get("checkin_enabled", True),
             lang=data.get("lang", "zh-CN"),
         )
 

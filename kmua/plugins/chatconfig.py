@@ -76,6 +76,22 @@ class ChatConfigMarkup:
                 ],
                 [
                     InlineKeyboardButton(
+                        f"斜杠自动回复 {self.get_status_emoji(self.chat_config.slash_enabled)}",
+                        callback_data=self.get_callback_data("slash_enabled"),
+                    ),
+                    InlineKeyboardButton(
+                        f"占卜功能 {self.get_status_emoji(self.chat_config.divination_enabled)}",
+                        callback_data=self.get_callback_data("divination_enabled"),
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        f"签到功能 {self.get_status_emoji(self.chat_config.checkin_enabled)}",
+                        callback_data=self.get_callback_data("checkin_enabled"),
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
                         i18n.t("bot.button.chat_config.save", locale=self.lang),
                         callback_data="config_chat save",
                     ),
@@ -152,6 +168,12 @@ async def config_chat(
                 )
             case "pick_bottle_enabled":
                 chat_config.pick_bottle_enabled = not chat_config.pick_bottle_enabled
+            case "slash_enabled":
+                chat_config.slash_enabled = not chat_config.slash_enabled
+            case "divination_enabled":
+                chat_config.divination_enabled = not chat_config.divination_enabled
+            case "checkin_enabled":
+                chat_config.checkin_enabled = not chat_config.checkin_enabled
             case _:
                 await callback_query.answer(
                     text=i18n.t("bot.msg.unknown_operation", locale=lang),

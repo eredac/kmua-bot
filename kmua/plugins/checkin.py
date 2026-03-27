@@ -89,6 +89,9 @@ async def checkin_handler(client: Client, message: Message):
     user = message.from_user
     if not user or not client.me:
         return
+    chat_config = await database.get_chat_config(message.chat)
+    if not chat_config.checkin_enabled:
+        return
 
     text = _extract_text(message, client.me.username)
     chat_id = message.chat.id

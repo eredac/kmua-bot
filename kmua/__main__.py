@@ -78,11 +78,12 @@ async def init_bot(client: Client = client):
             BotCommand("rank", "🏆 查看积分排行榜"),
             # Tag
             BotCommand("settag", "🏷 购买/续费个人标签 (100积分/月)"),
+            BotCommand("edittag", "✏️ 修改标签内容 (50积分，不重置有效期)"),
             BotCommand("mytag", "🏷 查看我的标签状态"),
         ]
     )
     common.jobqueue.add_daily_job("cleanup", jobs.cleanup, hour=4)
-    common.jobqueue.add_daily_job("tag_expiry_check", jobs.check_tag_expiry, hour=10)
+    common.jobqueue.add_daily_job("tag_expiry_check", jobs.check_tag_expiry, hour=4)
     common.jobqueue.start()
 
     # 恢复待提问状态（5分钟内）

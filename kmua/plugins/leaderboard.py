@@ -101,8 +101,10 @@ async def rank_command(client: Client, message: Message):
     chat_id = message.chat.id
     chat_title = message.chat.title or "本群"
 
+    # 先发占位消息：初次发送若含 tg://user 链接会触发通知，编辑则不会
+    placeholder = await message.reply_text("⏳ 加载排行榜中...")
     text, keyboard = await _fetch_page(chat_id, page=0, chat_title=chat_title)
-    await message.reply_text(
+    await placeholder.edit_text(
         text,
         parse_mode=ParseMode.HTML,
         reply_markup=keyboard,

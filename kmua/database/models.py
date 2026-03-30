@@ -705,3 +705,63 @@ class UserTag(Base):
 
     def __repr__(self) -> str:
         return f"<UserTag(user_id={self.user_id}, chat_id={self.chat_id}, tag='{self.tag_text}', expires_at={self.expires_at})>"
+
+
+class ChallengeRecord(Base):
+    """积分挑战记录表（猜拳对决）"""
+
+    __tablename__ = "challenge_record"
+    __table_args__ = {"schema": "shared"}
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, index=True
+    )
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.chat_data.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    challenger_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.user_data.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # None 表示开放挑战，有值表示指定挑战对象
+    challengee_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.user_data.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    bet_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # 发起方手续费（发起时即扣，不可退）
+    challenger_commission: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0
+    )
+    # 接受方手续费（接受时扣）
+    challengee_commission: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0
+    )
+    # pending / pending_rps / completed / cancelled
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    # rock / paper / scissors / None
+    challenger_choice: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    challengee_choice: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # 胜者 user_id；0 表示平局；None 表示未结算
+    winner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # pending 状态下为接受截止时间；pending_rps 状态下为出拳截止时间
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ChallengeRecord(id={self.id}, chat={self.chat_id}, "
+            f"challenger={self.challenger_id}, status='{self.status}')>"
+        )

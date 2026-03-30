@@ -80,6 +80,8 @@ async def init_bot(client: Client = client):
             BotCommand("settag", "🏷 购买/续费个人标签 (100积分/月)"),
             BotCommand("edittag", "✏️ 修改标签内容 (50积分，不重置有效期)"),
             BotCommand("mytag", "🏷 查看我的标签状态"),
+            # Challenge
+            BotCommand("challenge", "⚔️ 发起积分猜拳挑战 (默认2%/上限5%)"),
         ]
     )
     common.jobqueue.add_daily_job("cleanup", jobs.cleanup, hour=4)
@@ -89,6 +91,10 @@ async def init_bot(client: Client = client):
     # 恢复待提问状态（5分钟内）
     from kmua.plugins.dice_game import restore_pending_questions
     await restore_pending_questions()
+
+    # 恢复超时挑战（处理 Bot 重启期间遗留的超时记录）
+    from kmua.plugins.challenge import recover_challenges_on_startup
+    await recover_challenges_on_startup(client)
 
     logger.success(i18n.t("log.inited", locale=app_config.lang))
 

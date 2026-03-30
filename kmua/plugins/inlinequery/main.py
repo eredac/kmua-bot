@@ -40,45 +40,34 @@ async def inline_query_handler(client: Client, query: types.InlineQuery):
     results: list[types.InlineQueryResult] = []
 
     if query.chat_type == enums.ChatType.SUPERGROUP:
-        # 查询用户今日签到状态（跨所有群，因 inline query 阶段无 chat_id）
-        daily_count, slot_count = await asyncio.gather(
-            database.get_user_checkin_type_count_today(user.id, "daily"),
-            database.get_user_checkin_type_count_today(user.id, "slot"),
+        # inline query 阶段 Telegram 不提供 chat_id，无法按群判断签到状态
+        # 始终展示两个选项，实际的按群限制在 chosen_inline_result 阶段执行
+        results.append(
+            types.InlineQueryResultArticle(
+                id="daily_checkin",
+                title="📅 每日签到",
+                description="固定获得 5 积分（每天限一次）",
+                input_message_content=types.InputTextMessageContent(
+                    message_text="⏳ 正在签到...",
+                ),
+                reply_markup=types.InlineKeyboardMarkup(
+                    [[types.InlineKeyboardButton(text="⏳", callback_data="noop")]]
+                ),
+            )
         )
-        already_daily = daily_count > 0
-        slot_remaining = _SLOT_MAX_DAILY - slot_count
-
-        # 普通签到：未签到过任意类型才展示
-        if not already_daily and slot_count == 0:
-            results.append(
-                types.InlineQueryResultArticle(
-                    id="daily_checkin",
-                    title="📅 每日签到",
-                    description="固定获得 5 积分（每天限一次）",
-                    input_message_content=types.InputTextMessageContent(
-                        message_text="⏳ 正在签到...",
-                    ),
-                    reply_markup=types.InlineKeyboardMarkup(
-                        [[types.InlineKeyboardButton(text="⏳", callback_data="noop")]]
-                    ),
-                )
+        results.append(
+            types.InlineQueryResultArticle(
+                id="slot_checkin",
+                title="🎰 老虎机签到",
+                description=f"摇老虎机获得随机积分（每天最多 {_SLOT_MAX_DAILY} 次）",
+                input_message_content=types.InputTextMessageContent(
+                    message_text="🎰 老虎机启动中...",
+                ),
+                reply_markup=types.InlineKeyboardMarkup(
+                    [[types.InlineKeyboardButton(text="🎰", callback_data="noop")]]
+                ),
             )
-
-        # 老虎机签到：未做普通签到且还有剩余次数才展示
-        if not already_daily and slot_remaining > 0:
-            results.append(
-                types.InlineQueryResultArticle(
-                    id="slot_checkin",
-                    title="🎰 老虎机签到",
-                    description=f"摇老虎机获得随机积分（今日剩余 {slot_remaining} 次）",
-                    input_message_content=types.InputTextMessageContent(
-                        message_text="🎰 老虎机启动中...",
-                    ),
-                    reply_markup=types.InlineKeyboardMarkup(
-                        [[types.InlineKeyboardButton(text="🎰", callback_data="noop")]]
-                    ),
-                )
-            )
+        )
 
     await query.answer(
         results=results,

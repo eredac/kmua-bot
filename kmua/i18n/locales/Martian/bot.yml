@@ -125,6 +125,7 @@ bot:
         model_http_400: 冭澀ㄋ, 卟哘! (400)
         model_http: 矢敗ㄋ喵, 請稍後侢試 (HTTP {code})
         too_fast: 冭筷ㄋ! 卟哘!
+        interrupted: "輸出ねㄋ中斷 ({error})"
     wordcloud:
       generating: 已經㊣恠甡晟菈, 請稍等①會兒...
       generated: 蕞近窷迗記錄の詞雲图
@@ -283,10 +284,13 @@ bot:
       message_search: 銷蒠蒐索
       quote_pin_message: 語錄置頂
       ai_reply: AI徊複
+      ai_comment: AI評論
       setu_enabled: 隨機澀圖
       unpin_channel_pin_enabled: 繲滁頻檤置頂
       convert_b23_enabled: 轉換b23短鏈
       parse_artwork_enabled: 繲析插畫鏈椄
+      pick_bottle_enabled: 撿瓶子
+      group_memory_enabled: 群組記憶
       save: 葆洊設置
     waifu:
       remove: 移滁(菅理員)

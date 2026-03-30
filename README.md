@@ -42,17 +42,17 @@ demo: [@kmuav2bot](https://t.me/kmuav2bot)
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/ames0k0">
-                    <img src="https://avatars.githubusercontent.com/u/26835631?v=4" width="100;" alt="ames0k0"/>
-                    <br />
-                    <sub><b>YóUnǎi</b></sub>
-                </a>
-            </td>
-            <td align="center">
                 <a href="https://github.com/tjsky">
                     <img src="https://avatars.githubusercontent.com/u/7272911?v=4" width="100;" alt="tjsky"/>
                     <br />
                     <sub><b>去年夏天</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/ames0k0">
+                    <img src="https://avatars.githubusercontent.com/u/26835631?v=4" width="100;" alt="ames0k0"/>
+                    <br />
+                    <sub><b>YóUnǎi</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -90,6 +90,13 @@ demo: [@kmuav2bot](https://t.me/kmuav2bot)
                     <img src="https://avatars.githubusercontent.com/u/44945631?v=4" width="100;" alt="leafmoes"/>
                     <br />
                     <sub><b>leafmoes</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/AHCorn">
+                    <img src="https://avatars.githubusercontent.com/u/42889600?v=4" width="100;" alt="AHCorn"/>
+                    <br />
+                    <sub><b>安和</b></sub>
                 </a>
             </td>
 		</tr>

@@ -86,6 +86,43 @@ bot:
       chat_setu_disabled: Lewd pics are not allowed here!
       setu_cd: Too fast! Not yet!
       setu_error: Failed, meow~ Please try again later.
+    bottle:
+      no_content: Put something in the bottle~
+      text_too_long: Too long! It won't fit!
+      not_enough_coins: You don't have any bottles to use.
+      not_enough_coins_to_pick: You waited at the shore for a long time, but the sea gave you nothing~
+      throw_success: You successfully threw this bottle into the sea 🌊🍾
+      throw_failed: You tried to throw the bottle into the sea, but the sea threw an exception at you
+      no_bottles: You searched the shore for a long time, but found nothing~
+      unsupported_media: You found a bottle, but couldn't understand what's inside
+      unsupported_media_throw: The sea doesn't understand what's in your bottle~
+      not_your_bottle: This bottle isn't yours!
+      throw_back_success: You threw the bottle back into the sea 🌊🍾
+      report_failed: A wave called "Exception" washed away your report
+      report_success: The sea thanks you for your vigilance~
+      destroy_failed: Failed to destroy
+      destroy_success: You destroyed this bottle
+      not_found: Couldn't find this bottle
+      seek_result: This bottle was thrown into the sea by {sender} at {created_at}
+      pick_disabled_in_chat: Picking bottles is not allowed here
+      reply_prompt: Choose how you want to reply
+      reply_waiting: Please reply directly to this bottle message
+      reply_sent: Your reply has been sent 💌
+      reply_failed: Failed to send reply...
+      reply_received_anonymous: "Someone replied to your bottle 💌\n\n{content}"
+      reply_received: "Someone replied to your bottle 💌\n\nFrom: {sender}\n\n{content}"
+      reply_received_anonymous_header: Someone replied to your bottle 💌
+      reply_received_header: "{sender} replied to your bottle 💌"
+      reply_bottle_preview: "Your bottle:\n{preview}"
+      bottle_preview_media: "[Media content]"
+      reply_cancelled: Reply cancelled
+      no_reply_content: Reply content cannot be empty
+      reply_text_too_long: Reply is too long!
+      bottle_destroyed: Bottle destroyed
+      bottle_kept: Bottle returned to the sea
+      reply_too_fast: You're replying too fast, please wait~
+      reply_bottle_not_found: This bottle has disappeared into the sea
+      reply_sender_not_found: The bottle's owner has disappeared into the sea
     greeting:
       usage: |
         Usage: /greet <action> [arguments]
@@ -128,9 +165,21 @@ bot:
         model_http_400: That's too lewd! I can't do that! (400)
         model_http: Failed, meow~ Please try again later (HTTP {code})
         too_fast: Too fast! Not yet!
+        interrupted: "Output was interrupted ({error})"
     wordcloud:
       generating: Already generating, please wait a moment...
       generated: Word cloud of recent chat history.
+    infographic:
+      usage: |
+        Usage: /infographic <infographic syntax>
+        Or reply to a message with /infographic
+        
+        Example:
+        <code>/infographic infographic list-row-simple-horizontal-arrow\ndata\n  title Product Roadmap\n  lists\n    - label Research\n      value 80</code>
+      cooldown: Too fast! Please try again later.
+      rendered: "Rendered! Time: {time}ms"
+      timeout: Rendering timeout, please try again later.
+      error: "Rendering failed: {error}"
     waifu:
       disabled: The waifu feature is not allowed here.
       not_found: You don't have a waifu right now because I can't find any other members in my records.
@@ -268,6 +317,7 @@ bot:
     config: Change group settings
     greet: Set welcome message
     help: Help|More features
+    infographic: Render infographic
   button:
     back: Back
     repo: Source Code
@@ -285,10 +335,13 @@ bot:
       message_search: Message Search
       quote_pin_message: Pin Quoted Message
       ai_reply: AI Reply
+      ai_comment: AI Comment
       setu_enabled: Random Lewds
       unpin_channel_pin_enabled: Unpin Channel Pins
       convert_b23_enabled: Convert b23 Links
       parse_artwork_enabled: Parse Artwork Links
+      pick_bottle_enabled: Pick Bottle
+      group_memory_enabled: Group Memory
       save: Save
     waifu:
       remove: Remove (Admin)
@@ -319,3 +372,16 @@ bot:
     manyacg:
       detail: Details
       original: Original
+    bottle:
+      throw_back: Throw Back
+      destroy: Destroy Bottle
+      report: Report
+      seek: Trace Origin
+      reply: Reply
+      reply_anonymous: Anonymous Reply
+      reply_public: Public Reply
+      cancel_reply: Cancel
+      destroy_bottle_after_reply: Destroy Bottle
+      keep_bottle_after_reply: Return to Sea
+    agent:
+      clear_history: Clear History

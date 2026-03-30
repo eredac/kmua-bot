@@ -1,8 +1,5 @@
-import asyncio
-from contextlib import asynccontextmanager
 from typing import Any
 
-import aiocache
 from aiocache import SimpleMemoryCache
 
 from kmua.config import app_config
@@ -11,35 +8,19 @@ from kmua.config import app_config
 class _MemStore:
     def __init__(self) -> None:
         self._data: dict[str, Any] = {}
-        self._lock = asyncio.Lock()
 
     async def set(self, key: str, value: Any) -> None:
-        async with self._lock:
-            self._data[key] = value
+        self._data[key] = value
 
     async def get(self, key: str, default: Any = None) -> Any:
-        async with self._lock:
-            return self._data.get(key, default)
+        return self._data.get(key, default)
 
     async def delete(self, key: str) -> bool:
-        async with self._lock:
-            try:
-                del self._data[key]
-                return True
-            except KeyError:
-                return False
-
-    @asynccontextmanager
-    async def acquire_lock(self, key: str):
-        acquired = False
         try:
-            if not await self.get(key):
-                await self.set(key, True)
-                acquired = True
-            yield acquired
-        finally:
-            if acquired:
-                await self.delete(key)
+            del self._data[key]
+            return True
+        except KeyError:
+            return False
 
 
 memstore = _MemStore()
@@ -62,7 +43,10 @@ class _MemTTLCache:
         else:
             self.cache = SimpleMemoryCache()  # type: ignore
 
-    async def set(self, key: str, value: Any, ttl: int = 60) -> None:
+    async def set(self, key: str, value: Any, ttl: int = 0) -> None:
+        if ttl <= 0:
+            await self.cache.set(key, value)
+            return
         await self.cache.set(key, value, ttl=ttl)
 
     async def get(self, key: str, default: Any = None) -> Any:

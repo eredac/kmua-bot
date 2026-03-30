@@ -31,12 +31,6 @@ class ChatConfigMarkup:
                         f"{i18n.t('bot.button.chat_config.delete_events', locale=self.lang)} {self.get_status_emoji(self.chat_config.delete_events_enabled)}",
                         callback_data=self.get_callback_data("delete_events_enabled"),
                     ),
-                ],
-                [
-                    InlineKeyboardButton(
-                        f"{i18n.t('bot.button.chat_config.message_search', locale=self.lang)} {self.get_status_emoji(self.chat_config.message_search_enabled)}",
-                        callback_data=self.get_callback_data("message_search_enabled"),
-                    ),
                     InlineKeyboardButton(
                         f"{i18n.t('bot.button.chat_config.quote_pin_message', locale=self.lang)} {self.get_status_emoji(self.chat_config.quote_pin_message)}",
                         callback_data=self.get_callback_data("quote_pin_message"),
@@ -48,11 +42,19 @@ class ChatConfigMarkup:
                         callback_data=self.get_callback_data("ai_reply"),
                     ),
                     InlineKeyboardButton(
-                        f"{i18n.t('bot.button.chat_config.setu_enabled', locale=self.lang)} {self.get_status_emoji(self.chat_config.setu_enabled)}",
-                        callback_data=self.get_callback_data("setu_enabled"),
+                        f"{i18n.t('bot.button.chat_config.ai_comment', locale=self.lang)} {self.get_status_emoji(self.chat_config.ai_comment)}",
+                        callback_data=self.get_callback_data("ai_comment"),
+                    ),
+                    InlineKeyboardButton(
+                        f"{i18n.t('bot.button.chat_config.group_memory_enabled', locale=self.lang)} {self.get_status_emoji(self.chat_config.group_memory_enabled)}",
+                        callback_data=self.get_callback_data("group_memory_enabled"),
                     ),
                 ],
                 [
+                    InlineKeyboardButton(
+                        f"{i18n.t('bot.button.chat_config.setu_enabled', locale=self.lang)} {self.get_status_emoji(self.chat_config.setu_enabled)}",
+                        callback_data=self.get_callback_data("setu_enabled"),
+                    ),
                     InlineKeyboardButton(
                         f"{i18n.t('bot.button.chat_config.unpin_channel_pin_enabled', locale=self.lang)} {self.get_status_emoji(self.chat_config.unpin_channel_pin_enabled)}",
                         callback_data=self.get_callback_data(
@@ -174,6 +176,10 @@ async def config_chat(
                 chat_config.divination_enabled = not chat_config.divination_enabled
             case "checkin_enabled":
                 chat_config.checkin_enabled = not chat_config.checkin_enabled
+            case "ai_comment":
+                chat_config.ai_comment = not chat_config.ai_comment
+            case "group_memory_enabled":
+                chat_config.group_memory_enabled = not chat_config.group_memory_enabled
             case _:
                 await callback_query.answer(
                     text=i18n.t("bot.msg.unknown_operation", locale=lang),

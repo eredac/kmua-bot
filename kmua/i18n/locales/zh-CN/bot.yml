@@ -80,6 +80,8 @@ bot:
       /throwbottle - 扔一个漂流瓶
       /pickbottle - 捡一个漂流瓶
       /muteme - 主动禁言自己
+      /buygift - 购买礼物
+      /gift - 送礼物给 Bot
       </blockquote>
       对其他人使用 "/" 或 "\" 即可对其施法
     help_inline: |
@@ -140,6 +142,7 @@ bot:
         model_http_400: 太涩了, 不行! (400)
         model_http: 失败了喵, 请稍后再试 (HTTP {code})
         too_fast: 太快了! 不行!
+        interrupted: "*输出被中断了喵 ({error})"
     wordcloud:
       generating: 已经正在生成啦, 请稍等一会儿...
       generated: 最近聊天记录的词云图
@@ -172,3 +175,20 @@ bot:
           浮浮酱没有足够的权限呢...
           请确保 bot 拥有「封禁用户」权限喵~
         generic: "禁言失败了喵... 错误: {error}"
+    randmyavatar:
+      service_unavailable: manyacg 或 aniobjcut 服务未启用
+      processing: 正在更换头像...
+      fetch_failed: 获取图片失败, 请稍后再试
+      success: "头像更换成功!\n作品: <a href='{url}'>{title}</a>"
+      failed: "更换头像失败: {error}"
+    infographic:
+      usage: |
+        使用方法: /infographic <信息图语法>
+        或回复一条消息使用 /infographic
+
+        示例:
+        <code>/infographic infographic list-row-simple-horizontal-arrow\ndata\n  title Product Roadmap\n  lists\n    - label Research\n      value 80</code>
+      cooldown: 太快了! 请稍后再试
+      rendered: "渲染完成! 耗时: {time}ms"
+      timeout: 渲染超时, 请稍后再试
+      error: "渲染失败: {error}"

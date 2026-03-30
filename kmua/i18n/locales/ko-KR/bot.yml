@@ -125,6 +125,7 @@ bot:
         model_http_400: 너무 숭해요! 안돼요! (400)
         model_http: 실패했어요, 냥. 잠시 후에 다시 시도해주세요 (HTTP {code})
         too_fast: 너무 빨라요! 아직 안돼요!
+        interrupted: "출력이 중단되었어요 ({error})"
     wordcloud:
       generating: 생성 중이니 잠시만 기다려주세요...
       generated: 최근 채팅 기록 워드 클라우드
@@ -282,10 +283,13 @@ bot:
       message_search: 메시지 검색
       quote_pin_message: 인용 메시지 고정
       ai_reply: AI 답장
+      ai_comment: AI 댓글
       setu_enabled: 랜덤 숭한 짤
       unpin_channel_pin_enabled: 채널 공지 고정 해제
       convert_b23_enabled: b23 링크 변환
       parse_artwork_enabled: 작품 링크 분석
+      pick_bottle_enabled: 병 줍기
+      group_memory_enabled: 그룹 메모리
       save: 저장
     waifu:
       remove: 삭제 (관리자)

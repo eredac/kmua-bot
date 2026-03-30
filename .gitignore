@@ -13,3 +13,4 @@ data/**
 pgload/
 test.*
 .git-credentials
+.agentfs

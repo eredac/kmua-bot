@@ -1,7 +1,6 @@
 import datetime
 import random
 from dataclasses import dataclass
-from hashlib import md5
 from typing import Literal
 
 import pyrogram
@@ -34,36 +33,50 @@ class AnimePhotoInfo:
     tags: list[str] | None = None
 
 
+@dataclass
+class AnimePhotoResult:
+    success: bool = True
+    message: str | None = None
+    data: AnimePhotoInfo | None = None
+
+
 async def send_anime_photo(
-    ctx: RunContext[datatype.ContextDeps],
-    keyword: str = "",
-) -> AnimePhotoInfo | str:
-    """Get and send an anime photo (some users call it setu/涩图).
+    ctx: RunContext[datatype.ContextDeps], keyword: str = ""
+) -> AnimePhotoResult:
+    """Get and send anime photos (or called it setu/涩图).
 
     Args:
-        keyword: Optional keyword to search for specific anime photos, max length is 100 characters.
+        keyword: Optional keyword to search for specific anime photos.
 
     Returns:
-        An AnimePhotoInfo object if successful, or an error message string.
+        An AnimePhotoResult dataclass containing the result of the operation.
     """
-    logger.debug(
-        f"get_and_send_a_anime_photo called with chat_id: {ctx.deps.chat_id}, user_id: {ctx.deps.user_id}, keyword: {keyword}"
-    )
     if ctx.deps.message is None or ctx.deps.message.id is None:
-        return "Message ID is required to reply with the photo."
+        return AnimePhotoResult(
+            success=False, message="Current message context is unavailable."
+        )
     if (
         ctx.deps.chat_id is not None
         and ctx.deps.chat_id != ctx.deps.user_id
         and not (await database.get_chat_config(ctx.deps.chat_id)).setu_enabled
     ):
-        return "Feature is disabled by group administrator."
+        return AnimePhotoResult(
+            success=False, message="Anime photo feature is disabled in this chat."
+        )
     try:
+        ratekey = f"anime_photo_rate_limit:{ctx.deps.chat_id}:{ctx.deps.user_id}"
+        if await common.memttlcache.get(ratekey, 0) > 3:
+            return AnimePhotoResult(
+                success=False,
+                message="You are sending requests too frequently. Please try again later.",
+            )
+        current_count = await common.memttlcache.get(ratekey, 0)
+        await common.memttlcache.set(ratekey, current_count + 1, ttl=10)
         user_config = await database.get_user_config(ctx.deps.user_id)
         lang = user_config.lang
         if keyword:
             params = {
                 "r18": 2,
-                "page_size": 50,
                 "hybrid": app_config.manyacg_hybrid_search,
                 "keyword": keyword,
             }
@@ -77,7 +90,10 @@ async def send_anime_photo(
                 params={"r18": 2},
             )
         if resp.status_code != 200:
-            return f"Api request failed with code: {resp.status_code}"
+            return AnimePhotoResult(
+                success=False,
+                message=f"API request failed with code: {resp.status_code}",
+            )
         artwork: dict = random.choice(resp.json()["data"])
         picture: dict = artwork["pictures"][
             random.randint(0, len(artwork["pictures"]) - 1)
@@ -111,22 +127,28 @@ async def send_anime_photo(
                 message_id=ctx.deps.message.id,
             ),
         )
-        return AnimePhotoInfo(
-            title=artwork["title"],
-            source_url=artwork["source_url"],
-            r18=artwork["r18"],
-            description=artwork.get("description", "")[:512],
-            artist=Artist(
-                name=artwork.get("artist", {}).get("name", ""),
-                type=artwork["artist"].get("type", ""),
-                username=artwork["artist"].get("username", ""),
-                uid=artwork["artist"].get("uid", ""),
+        return AnimePhotoResult(
+            success=True,
+            data=AnimePhotoInfo(
+                title=artwork["title"],
+                source_url=artwork["source_url"],
+                r18=artwork["r18"],
+                description=artwork.get("description", "")[:512],
+                artist=Artist(
+                    name=artwork.get("artist", {}).get("name", ""),
+                    type=artwork["artist"].get("type", ""),
+                    username=artwork["artist"].get("username", ""),
+                    uid=artwork["artist"].get("uid", ""),
+                ),
+                tags=artwork.get("tags", [])[:10],
             ),
-            tags=artwork.get("tags", [])[:10],
         )
     except Exception as e:
         logger.error(f"get_and_send_a_anime_photo error: {e.__class__.__name__}:{e}")
-        return e.__class__.__name__
+        return AnimePhotoResult(
+            success=False,
+            message=f"Error occurred: {e.__class__.__name__}",
+        )
 
 
 @dataclass
@@ -145,7 +167,7 @@ async def get_history_messages(
     anchor_id: int | None = None,
     start_id: int | None = None,
     end_id: int | None = None,
-) -> list[ChatMessage] | str:
+) -> str:
     """
     Fetch historical messages from chat, can not be used in private chats.
 
@@ -161,7 +183,7 @@ async def get_history_messages(
         end_id: ending message ID (for "between" mode).
 
     Returns:
-        A list of ChatMessage or error string.
+        Formatted string of chat history or error message.
     """
     chat_id = ctx.deps.chat_id
     user_id = ctx.deps.user_id
@@ -203,25 +225,38 @@ async def get_history_messages(
         raise ModelRetry(
             "Invalid direction. Use 'latest', 'before', 'after', or 'between'."
         )
-
-    logger.debug(
-        f"get_history_messages called: direction={direction}, start_id={start_id}, end_id={end_id}, chat_id={chat_id}"
-    )
     try:
         msgs = await common.get_messages_with_cache(
             chat_id=chat_id, message_ids=list(range(start_id, end_id)), replies=1
         )
-        return [
-            ChatMessage(
-                user_id=msg.user_id,
-                username=(await database.get_user_by_id(msg.user_id)).full_name
-                if msg.user_id
-                else None,
-                text=msg.text,
-                time=msg.time,
+
+        if not msgs:
+            return "No messages found in the specified range."
+
+        # Format messages as readable text
+        lines = [f"Chat History ({len(msgs)} messages):\n"]
+
+        for msg in msgs:
+            if not msg.user_id:
+                continue
+
+            # Get username
+            user = await database.get_user_by_id(msg.user_id)
+            username = user.full_name if user is not None else f"User_{msg.user_id}"
+
+            # Format time (full datetime)
+            time_str = (
+                msg.time.strftime("%Y-%m-%d %H:%M:%S")
+                if msg.time
+                else "????-??-?? ??:??:??"
             )
-            for msg in msgs
-        ]
+
+            # Format message (no truncation)
+            text = msg.text if msg.text else "[media/empty]"
+
+            lines.append(f"[{time_str}]<{msg.message_id}> {username}: {text}")
+
+        return "\n".join(lines)
     except Exception as e:
         logger.error(f"Error fetching history messages: {e.__class__.__name__}:{e}")
         return f"Error fetching history messages: {e.__class__.__name__}"
@@ -232,7 +267,7 @@ async def search_messages(
     query: str,
     count: int = 20,
     user_id: int | None = None,
-) -> list[ChatMessage] | str:
+) -> str:
     """Search messages by query in the current chat.
 
     Arguments:
@@ -241,7 +276,7 @@ async def search_messages(
         count -- maximum number of messages to return (default: 20).
 
     Returns:
-        A list of ChatMessage objects if successful, or an error message string.
+        Formatted search results or error message.
     """
 
     if not btts.btts_client:
@@ -249,9 +284,6 @@ async def search_messages(
     if count <= 0 or count > 200:
         raise ModelRetry("Count must be between 1 and 200, inclusive.")
     chat_id = int(str(ctx.deps.chat_id).removeprefix("-100"))
-    logger.debug(
-        f"search_messages called with chat_id: {chat_id}, query: {query}, count: {count}, user_id: {user_id}"
-    )
     resp, err = await btts.btts_client.search(
         query=query,
         chat_id=chat_id,
@@ -261,77 +293,39 @@ async def search_messages(
     )
     if err != "" or resp is None:
         logger.error(f"Error searching messages: {err}")
-        return f"Error searching messages"
+        return "Error searching messages"
     results = resp.results
     if not results.hits:
         return "No messages found matching the query."
-    messages = []
-    for hit in results.hits:
+
+    # Format search results
+    lines = [f"🔍 Search Results for '{query}' ({len(results.hits)} matches):\n"]
+
+    for i, hit in enumerate(results.hits, 1):
         if hit.chat_id != chat_id:
             continue
         if user_id and hit.user_id != user_id:
             continue
         if not hit.message:
             continue
+
+        # Get user info
         user = await database.get_user_by_id(hit.user_id)
-        messages.append(
-            ChatMessage(
-                user_id=hit.user_id,
-                username=user.full_name if user else str(hit.user_id),
-                text=hit.message,
-                time=datetime.datetime.fromtimestamp(
-                    hit.timestamp, datetime.timezone.utc
-                ),
-            )
-        )
-    if not messages:
+        username = user.full_name if user is not None else f"User_{hit.user_id}"
+
+        # Format time
+        time_str = datetime.datetime.fromtimestamp(
+            hit.timestamp, datetime.UTC
+        ).strftime("%Y-%m-%d %H:%M:%S")
+
+        # Format message with match highlighting
+        message_text = hit.message
+
+        lines.append(f"Result {i}:")
+        lines.append(f"  [{time_str}]<{hit.id}> {username}: {message_text}")
+        lines.append("")  # Empty line between results
+
+    if len(lines) == 1:  # Only header, no results
         return "No messages found matching the query."
-    return messages
 
-
-async def schedule_message(
-    ctx: RunContext[datatype.ContextDeps],
-    message: str,
-    schedule_time: str,
-) -> str | None:
-    """Schedule a message to be sent at a specific time,
-    can be used to send reminders or scheduled announcements,
-    use get_current_time to get the current time in python datetime object.
-
-    Arguments:
-        message: text message to be sent.
-        schedule_time: ISO 8601 formatted string representing the time to send the message,
-            Example: "2025-06-04T15:00:00+08:00"
-
-    Returns:
-        None if successful, or an error message string.
-    """
-    logger.debug(
-        f"schedule_message called with chat_id: {ctx.deps.chat_id}, user_id: {ctx.deps.user_id}, message: {message}, schedule_time: {schedule_time}"
-    )
-    try:
-        schedule_datetime = datetime.datetime.fromisoformat(schedule_time)
-    except ValueError as e:
-        raise ModelRetry(
-            f"Invalid schedule_time format. Use ISO 8601 format, e.g., '2025-06-04T15:00:00+08:00'.\nError: {e}"
-        )
-    if schedule_datetime < datetime.datetime.now(datetime.timezone.utc):
-        raise ModelRetry("Schedule time must be in the future.")
-    try:
-
-        async def _send_scheduled_message():
-            try:
-                await ctx.deps.message.reply(text=message)
-            except Exception as e:
-                logger.error(
-                    f"Failed to send scheduled message: {e.__class__.__name__}:{e}"
-                )
-
-        common.jobqueue.add_onetime_job(
-            f"agent_schedule_message:{ctx.deps.chat_id}:{ctx.deps.user_id}:{schedule_datetime.timestamp()}:{md5(message.encode()).hexdigest()}",
-            run_date=schedule_datetime,
-            func=_send_scheduled_message,
-        )
-    except Exception as e:
-        logger.error(f"Error scheduling message: {e.__class__.__name__}:{e}")
-        return f"Error scheduling message: {e.__class__.__name__}"
+    return "\n".join(lines)

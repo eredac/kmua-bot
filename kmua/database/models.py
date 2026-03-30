@@ -2,6 +2,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import List
 
+import sqlalchemy as sa
 from sqlalchemy import (
     JSON,
     BigInteger,
@@ -59,6 +60,7 @@ class ChatConfig:
     slash_enabled: bool = True
     divination_enabled: bool = True
     checkin_enabled: bool = True
+    group_memory_enabled: bool = True
     lang: str = "zh-CN"
 
     @classmethod
@@ -82,6 +84,7 @@ class ChatConfig:
             slash_enabled=data.get("slash_enabled", True),
             divination_enabled=data.get("divination_enabled", True),
             checkin_enabled=data.get("checkin_enabled", True),
+            group_memory_enabled=data.get("group_memory_enabled", True),
             lang=data.get("lang", "zh-CN"),
         )
 
@@ -352,6 +355,73 @@ class Bottle(Base):
 
     def __repr__(self) -> str:
         return f"<Bottle(id={self.id}, sender_id={self.sender_id})>"
+
+
+class BottleReply(Base):
+    __tablename__ = "bottle_replies"
+    __table_args__ = {"schema": "kmua"}
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+        index=True,
+    )
+    bottle_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("kmua.bottles.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    replier_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.user_data.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    text: Mapped[str] = mapped_column(String(4096), nullable=False)
+    is_anonymous: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=sa.text("false")
+    )
+    file_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    media_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<BottleReply(id={self.id}, bottle_id={self.bottle_id}, replier_id={self.replier_id})>"
+
+
+class Gift(Base):
+    __tablename__ = "gifts"
+    __table_args__ = {"schema": "kmua"}
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+        index=True,
+    )
+    owner_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.user_data.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    rarity: Mapped[int] = mapped_column(Integer, nullable=False)
+    sent_to_bot: Mapped[bool] = mapped_column(Boolean, default=False)
+    gift_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<Gift(id={self.id}, owner_id={self.owner_id}, gift_id='{self.gift_id}')>"
+        )
 
 
 class ImageGenDailyUsage(Base):

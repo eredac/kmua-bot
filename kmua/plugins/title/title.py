@@ -7,6 +7,7 @@ from pyrogram.client import Client as PyrogramClient
 
 from kmua import common, database, i18n
 from kmua.common.tgmethod import mention_html
+from kmua.common.utils import get_reply_target
 from kmua.logger import logger
 
 from . import utils
@@ -20,7 +21,8 @@ async def set_member_title(client: PyrogramClient, message: pyrogram.types.Messa
     user = message.sender_chat or message.from_user
     if not user or not chat or not chat.id:
         return
-    target = message.reply_to_message.from_user if message.reply_to_message else user
+    reply_target = get_reply_target(message)
+    target = reply_target.from_user if reply_target else user
     if not target or not target.id or isinstance(target, pyrogram.types.Chat):
         await message.reply_text(
             i18n.t(
@@ -75,12 +77,12 @@ async def set_member_title(client: PyrogramClient, message: pyrogram.types.Messa
             )
         )
         await message.reply_text(text, parse_mode=pyrogram.enums.ParseMode.HTML)
-    except pyrogram.errors.UserCreator as e:
+    except pyrogram.errors.UserCreator:
         await message.reply_text(
             i18n.t("bot.msg.title.errors.creator", locale=chat_config.lang),
             parse_mode=pyrogram.enums.ParseMode.HTML,
         )
-    except pyrogram.errors.ChatAdminRequired as e:
+    except pyrogram.errors.ChatAdminRequired:
         await message.reply_text(
             i18n.t("bot.msg.title.errors.admin_required", locale=chat_config.lang),
             parse_mode=pyrogram.enums.ParseMode.HTML,
@@ -191,12 +193,12 @@ async def delete_member_title(client: PyrogramClient, message: pyrogram.types.Me
             i18n.t("bot.msg.title.deleted", locale=lang),
             parse_mode=pyrogram.enums.ParseMode.HTML,
         )
-    except pyrogram.errors.UserCreator as e:
+    except pyrogram.errors.UserCreator:
         await message.reply_text(
             i18n.t("bot.msg.title.errors.creator", locale=lang),
             parse_mode=pyrogram.enums.ParseMode.HTML,
         )
-    except pyrogram.errors.ChatAdminRequired as e:
+    except pyrogram.errors.ChatAdminRequired:
         await message.reply_text(
             i18n.t("bot.msg.title.errors.admin_required", locale=lang),
             parse_mode=pyrogram.enums.ParseMode.HTML,

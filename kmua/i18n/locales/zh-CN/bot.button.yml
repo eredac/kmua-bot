@@ -21,6 +21,8 @@ bot:
       convert_b23_enabled: 转换b23短链
       parse_artwork_enabled: 解析插画链接
       pick_bottle_enabled: 捡瓶子
+      ai_comment: AI评论
+      group_memory_enabled: 群组记忆
       save: 保存设置
     waifu:
       remove: 移除
@@ -52,3 +54,5 @@ bot:
     manyacg:
       detail: 详情
       original: 原图
+    agent:
+      clear_history: 记忆清除

@@ -8,7 +8,6 @@ from pyrogram.types import Chat, User
 
 from kmua import database, enums
 from kmua.bot import client
-from kmua.common import client
 from kmua.config import app_config
 from kmua.database.models import ChatData, UserData
 from kmua.logger import logger
@@ -19,6 +18,72 @@ from .memory_store import memttlcache
 def chat_message_cache_key(chat_id: int, message_id: int) -> str:
     """Generate a cache key for a chat message."""
     return f"chat_history:{chat_id}:{message_id}"
+
+
+def chat_message_object_cache_key(chat_id: int, message_id: int) -> str:
+    """Generate a cache key for a full chat message object."""
+    return f"chat_message_obj:{chat_id}:{message_id}"
+
+
+async def cache_message_object(message: pyrogram.types.Message) -> None:
+    """Cache a full message object for later retrieval."""
+    if not message.chat or not message.chat.id:
+        return
+
+    chat_id = message.chat.id
+    message_id = message.id
+    cache_key = chat_message_object_cache_key(chat_id, message_id)
+    ttl = app_config.cachettl_message_object
+
+    await memttlcache.set(cache_key, message, ttl=ttl)
+
+
+async def get_cached_message_object(
+    chat_id: int, message_id: int
+) -> pyrogram.types.Message | None:
+    """Get a cached message object."""
+    cache_key = chat_message_object_cache_key(chat_id, message_id)
+    return await memttlcache.get(cache_key, None)
+
+
+async def get_cached_messages_objects(
+    chat_id: int, message_ids: list[int]
+) -> list[pyrogram.types.Message]:
+    """Get multiple cached message objects, fetching from API if not in cache."""
+    cached_messages: dict[int, pyrogram.types.Message] = {}
+    to_fetch_ids: list[int] = []
+
+    for msg_id in message_ids:
+        if msg_id in cached_messages:
+            continue
+        cached = await get_cached_message_object(chat_id, msg_id)
+        if cached:
+            cached_messages[msg_id] = cached
+        else:
+            to_fetch_ids.append(msg_id)
+
+    if to_fetch_ids:
+        logger.debug(f"Fetching {len(to_fetch_ids)} uncached messages from API")
+        try:
+            fetched = await client.get_messages(
+                chat_id=chat_id,
+                message_ids=to_fetch_ids,
+            )
+            if isinstance(fetched, pyrogram.types.Message):
+                fetched = [fetched] if fetched else []
+            else:
+                fetched = fetched or []
+
+            for msg in fetched:
+                if msg:
+                    await cache_message_object(msg)
+                    cached_messages[msg.id] = msg
+        except Exception as e:
+            logger.debug(f"Failed to fetch messages from API: {e}")
+
+    result = list(cached_messages.values())
+    result.sort(key=lambda x: x.id)
+    return result
 
 
 @dataclass
@@ -91,8 +156,9 @@ async def mention_html(chat: User | Chat | UserData | ChatData) -> str:
     if isinstance(chat, ChatData):
         raise NotImplementedError
     db_user = await database.upsert_user(chat)
-    if not db_user.is_real_user and db_user.username and db_user.full_name:
-        return f"<a href='https://t.me/{db_user.username}'>{html.escape(db_user.full_name)}</a>"
+    if not db_user.is_real_user:
+        if db_user.username and db_user.full_name:
+            return f"<a href='https://t.me/{db_user.username}'>{html.escape(db_user.full_name)}</a>"
     return f"<a href='tg://user?id={chat.id}'>{html.escape(chat.full_name)}</a>"
 
 
@@ -147,3 +213,22 @@ def get_message_origin(
             case pyrogram.enums.MessageOriginType.CHAT:
                 return origin.sender_chat  # type: ignore
     return message.sender_chat or message.from_user
+
+
+async def get_chat_full(client: pyrogram.client.Client, chat_id: int) -> Chat:
+    """Get chat full info with cache
+
+    Arguments:
+        client -- pyrogram client
+        chat_id -- chat_id
+
+    Returns:
+        Chat
+    """
+    cache_key = f"chat_full:{chat_id}"
+    cached = await memttlcache.get(cache_key, None)
+    if cached and isinstance(cached, Chat):
+        return cached
+    chat = await client.get_chat(chat_id)
+    await memttlcache.set(cache_key, chat, ttl=3600)
+    return chat

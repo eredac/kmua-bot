@@ -1,0 +1,344 @@
+from typing import Any
+
+import pydantic_ai
+import pyrogram
+from pydantic_ai import (
+    Agent,
+    UserContent,
+)
+from pydantic_ai.messages import (
+    MULTI_MODAL_CONTENT_TYPES,
+    ModelMessage,
+    PartDeltaEvent,
+    PartStartEvent,
+    TextPart,
+    TextPartDelta,
+)
+from pyrogram.client import Client as PyrogramClient
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+from kmua.common.memory_store import memttlcache
+from kmua.config import app_config
+from kmua.i18n import i18n
+from kmua.logger import logger
+from kmua.plugins.agent import datatype, provider, state
+from kmua.plugins.agent.datatype import AskUserOutput, EndTurn
+from kmua.plugins.agent.output import StreamingOutput, TypingKeepAlive, reply_output
+from kmua.plugins.agent.prompt import check_needs_multimodal
+
+
+async def get_chat_model_override(chat_id: int, role: str = "main") -> str | None:
+    """Return the per-chat model override spec for the given role, or None if not set."""
+    return await memttlcache.get(state.chat_model_override_key(chat_id, role))
+
+
+async def set_chat_model_override(
+    chat_id: int, model_spec: str | None, role: str = "main"
+) -> None:
+    """Set (or clear, when model_spec is None) the per-chat model override for the given role."""
+    key = state.chat_model_override_key(chat_id, role)
+    if model_spec is None:
+        await memttlcache.delete(key)
+    else:
+        await memttlcache.set(key, model_spec)
+
+
+async def get_chat_prompt_override(chat_id: int) -> str | None:
+    """Return the per-chat system prompt override, or None if not set."""
+    return await memttlcache.get(state.chat_prompt_override_key(chat_id))
+
+
+async def set_chat_prompt_override(chat_id: int, prompt: str | None) -> None:
+    """Set (or clear, when prompt is None) the per-chat system prompt override."""
+    key = state.chat_prompt_override_key(chat_id)
+    if prompt is None:
+        await memttlcache.delete(key)
+    else:
+        await memttlcache.set(key, prompt)
+
+
+async def run_agent(
+    agi: Agent[Any, Any],
+    client: PyrogramClient,
+    message: pyrogram.types.Message,
+    user_id: int,
+    chat_id: int,
+    user_prompt: list[UserContent],
+    history: list[ModelMessage],
+    deps: Any,
+    multimodal_model: Any,
+    model: Any,
+    lang: str,
+    additional_instructions: str | None = None,
+) -> None:
+    """Run the agent with full streaming/non-streaming support, history saving,
+    TypingKeepAlive and unified error handling.
+
+    This is the single source of truth for agent execution shared by both
+    the normal wake flow and the follow-up flow.
+    """
+
+    needs_multimodal = check_needs_multimodal(user_prompt, history)
+
+    # Apply per-chat model override if set
+    override_name = await get_chat_model_override(chat_id, "main")
+    if override_name:
+        use_model = provider.make_chat_model(override_name)
+    else:
+        multimodal_override = await get_chat_model_override(chat_id, "multimodal")
+        effective_multimodal = (
+            provider.make_chat_model(multimodal_override)
+            if multimodal_override
+            else multimodal_model
+        )
+        use_model = effective_multimodal if needs_multimodal else model
+
+    try:
+        async with TypingKeepAlive(client, message):
+            if app_config.agent_streaming:
+                streaming_output: StreamingOutput | None = None
+                output: Any = None
+                try:
+                    async with agi.iter(
+                        model=use_model,
+                        instructions=additional_instructions,
+                        user_prompt=user_prompt,
+                        message_history=history,
+                        deps=deps,
+                    ) as agent_run:
+                        async for node in agent_run:
+                            if Agent.is_model_request_node(node):
+                                async with node.stream(agent_run.ctx) as request_stream:
+                                    async for event in request_stream:
+                                        if isinstance(event, PartStartEvent):
+                                            if isinstance(event.part, TextPart):
+                                                if streaming_output is None:
+                                                    streaming_output = StreamingOutput(
+                                                        client, message
+                                                    )
+                                                await streaming_output.append_delta(
+                                                    event.part.content
+                                                )
+                                        elif isinstance(event, PartDeltaEvent):
+                                            if isinstance(event.delta, TextPartDelta):
+                                                if streaming_output is None:
+                                                    streaming_output = StreamingOutput(
+                                                        client, message
+                                                    )
+                                                await streaming_output.append_delta(
+                                                    event.delta.content_delta
+                                                )
+                            elif Agent.is_call_tools_node(node):
+                                has_tool_calls = False
+                                for part in node.model_response.parts:
+                                    if part.part_kind == "tool-call":
+                                        has_tool_calls = True
+                                        args_str = str(part.args) if part.args else ""
+                                        logger.debug(
+                                            f"Tool call for user {user_id} in chat {chat_id}: "
+                                            f"{part.tool_name}({args_str})"
+                                        )
+                                if has_tool_calls and streaming_output is not None:
+                                    await streaming_output.finalize()
+                                    streaming_output = None
+                            elif Agent.is_end_node(node):
+                                assert agent_run.result is not None, (
+                                    "Agent run ended without result"
+                                )
+                                logger.debug(
+                                    f"Agent run end with result: {agent_run.result.output}"
+                                )
+                                output = agent_run.result.output
+                                if isinstance(output, (EndTurn, AskUserOutput)):
+                                    if streaming_output is not None:
+                                        await streaming_output.abort()
+                                else:
+                                    # Check final_result first before sending anything
+                                    if (
+                                        isinstance(output, str)
+                                        and "final_result" in output
+                                    ):
+                                        if streaming_output is not None:
+                                            await streaming_output.abort()
+                                        logger.warning(
+                                            f"The stupid agent returned 'final_result' as text🤡 for user {user_id}"
+                                        )
+                                    elif streaming_output is not None:
+                                        await streaming_output.finalize()
+                                    elif output:
+                                        await reply_output(client, message, output)
+                        # Save full output for follow-up detection
+                        full_output = ""
+                        if streaming_output is not None:
+                            full_output = streaming_output.current_text
+                        elif isinstance(output, str):
+                            full_output = output
+                        if (
+                            full_output
+                            and message.chat
+                            and message.chat.type
+                            in (
+                                pyrogram.enums.ChatType.SUPERGROUP,
+                                pyrogram.enums.ChatType.GROUP,
+                            )
+                        ):
+                            # Get last reply info from existing BotLastReply if available
+                            bot_reply = await memttlcache.get(
+                                state.bot_last_reply_key(chat_id)
+                            )
+                            if bot_reply and isinstance(
+                                bot_reply, datatype.BotLastReply
+                            ):
+                                bot_reply.full_output = full_output
+                                await memttlcache.set(
+                                    state.bot_last_reply_key(chat_id),
+                                    bot_reply,
+                                    ttl=300,
+                                )
+                        await memttlcache.set(
+                            state.history_key(chat_id, user_id),
+                            agent_run.all_messages(),
+                            ttl=app_config.cachettl_agent_history,
+                        )
+                except Exception:
+                    if streaming_output is not None:
+                        await streaming_output.abort()
+                    raise
+            else:
+                async with agi.iter(
+                    model=use_model,
+                    user_prompt=user_prompt,
+                    instructions=additional_instructions,
+                    message_history=history,
+                    deps=deps,
+                ) as agent_run:
+                    replied = False
+                    full_output_parts: list[str] = []
+                    output: Any = None
+                    async for node in agent_run:
+                        if Agent.is_call_tools_node(node):
+                            for part in node.model_response.parts:
+                                if part.part_kind == "tool-call":
+                                    args_str = str(part.args) if part.args else ""
+                                    logger.debug(
+                                        f"Tool call for user {user_id} in chat {chat_id}: "
+                                        f"{part.tool_name}({args_str})"
+                                    )
+                                elif part.part_kind == "text" and part.content:
+                                    # Check if content is final_result before sending
+                                    if "final_result" in part.content:
+                                        logger.warning(
+                                            f"The stupid agent returned 'final_result' as text🤡 for user {user_id}"
+                                        )
+                                    else:
+                                        await reply_output(
+                                            client, message, part.content
+                                        )
+                                        full_output_parts.append(part.content)
+                                        replied = True
+                        elif Agent.is_model_request_node(node):
+                            for part in node.request.parts:
+                                if part.part_kind == "tool-return":
+                                    content = part.content
+                                    if isinstance(
+                                        part.content, MULTI_MODAL_CONTENT_TYPES
+                                    ):
+                                        content = "[MULTI_MODAL]"
+                                    logger.trace(
+                                        f"Tool {part.tool_name} returned for user {user_id} in chat {chat_id}: {content}"
+                                    )
+                        elif Agent.is_end_node(node):
+                            assert agent_run.result is not None, (
+                                "Agent run ended without result"
+                            )
+                            logger.debug(
+                                f"Agent run end with result: {agent_run.result.output}"
+                            )
+                            output = agent_run.result.output
+                            if isinstance(output, str) and "final_result" in output:
+                                logger.warning(
+                                    f"The stupid agent returned 'final_result' as text🤡 for user {user_id}"
+                                )
+                            elif isinstance(output, (EndTurn, AskUserOutput)):
+                                logger.debug(
+                                    f"Agent returned {type(output).__name__} for user {user_id}"
+                                )
+                            elif not replied and output:
+                                await reply_output(client, message, output)
+                                full_output_parts.append(output)
+                    # Save full output for follow-up detection
+                    full_output = "\n".join(full_output_parts)
+                    if (
+                        full_output
+                        and message.chat
+                        and message.chat.type
+                        in (
+                            pyrogram.enums.ChatType.SUPERGROUP,
+                            pyrogram.enums.ChatType.GROUP,
+                        )
+                    ):
+                        bot_reply = await memttlcache.get(
+                            state.bot_last_reply_key(chat_id)
+                        )
+                        if bot_reply and isinstance(bot_reply, datatype.BotLastReply):
+                            bot_reply.full_output = full_output
+                            await memttlcache.set(
+                                state.bot_last_reply_key(chat_id),
+                                bot_reply,
+                                ttl=300,
+                            )
+                    await memttlcache.set(
+                        state.history_key(chat_id, user_id),
+                        agent_run.all_messages(),
+                        ttl=app_config.cachettl_agent_history,
+                    )
+    except TypeError as e:
+        # https://github.com/pydantic/pydantic-ai/issues/527
+        # https://github.com/pydantic/pydantic-ai/issues/1813
+        # https://github.com/pydantic/pydantic-ai/issues/1746
+        logger.exception(f"Agent run error: {e}")
+        await message.reply_text(
+            f"{i18n.t('bot.msg.agent.errors.too_fast', locale=lang)}\n<code>{e}</code>",
+            parse_mode=pyrogram.enums.ParseMode.HTML,
+        )
+    except (
+        pydantic_ai.exceptions.ModelHTTPError,
+        pydantic_ai.exceptions.ModelAPIError,
+    ) as e:
+        logger.error(f"Agent HTTP error: {e.__class__.__name__}: {e}")
+        markup = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        text=i18n.t("bot.button.agent.clear_history", locale=lang),
+                        callback_data=f"agent_clear_history:{chat_id}:{user_id}",
+                    )
+                ]
+            ]
+        )
+        status_code = getattr(e, "status_code", None)
+        if status_code == 400:
+            await message.reply_text(
+                i18n.t("bot.msg.agent.errors.model_http_400", locale=lang),
+                reply_markup=markup,
+            )
+        elif status_code:
+            await message.reply_text(
+                i18n.t("bot.msg.agent.errors.model_http", locale=lang).format(
+                    code=status_code
+                ),
+            )
+        else:
+            await message.reply_text(
+                i18n.t("bot.msg.agent.errors.interrupted", locale=lang).format(
+                    error=f"{e.__class__.__name__}"
+                ),
+                reply_markup=markup,
+            )
+    except Exception as e:
+        logger.error(f"Agent run error: {e.__class__.__name__} - {e}")
+        await message.reply_text(
+            i18n.t("bot.msg.agent.errors.interrupted", locale=lang).format(
+                error=f"{e.__class__.__name__}"
+            )
+        )

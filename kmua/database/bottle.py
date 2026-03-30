@@ -1,23 +1,21 @@
-import random
-
 import sqlalchemy
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kmua.config import app_config
 from kmua.database.db import with_session, with_tx
-from kmua.database.models import Bottle, UserData
+from kmua.database.models import Bottle, BottleReply, UserData
 
 
 @with_tx
 async def pick_random_bottle(session: AsyncSession | None = None) -> Bottle | None:
     assert session is not None, "Session must be provided"
-    total_bottles = await count_bottles(session)
-    if total_bottles == 0:
-        return None
-    random_offset = random.randint(0, total_bottles - 1)
-    random_bottle_stmt = sqlalchemy.select(Bottle).offset(random_offset).limit(1)
+    random_bottle_stmt = (
+        sqlalchemy.select(Bottle).order_by(sqlalchemy.func.random()).limit(1)
+    )
     result = await session.execute(random_bottle_stmt)
-    bottle = result.scalar_one()
+    bottle = result.scalar_one_or_none()
+    if bottle is None:
+        return None
     await increment_bottle_picks(bottle.id, session)
     return bottle
 
@@ -88,7 +86,8 @@ async def delete_bottle(bottle_id: int, session: AsyncSession | None = None):
 
 
 @with_session
-async def count_bottles(session: AsyncSession) -> int:
+async def count_bottles(session: AsyncSession | None = None) -> int:
+    assert session is not None, "Session must be provided"
     stmt = sqlalchemy.select(sqlalchemy.func.count()).select_from(Bottle)
     result = await session.execute(stmt)
     return result.scalar() or 0
@@ -102,3 +101,67 @@ async def get_bottle_by_id(
 
     bottle = await session.get(Bottle, bottle_id)
     return bottle
+
+
+@with_tx
+async def add_bottle_reply(
+    bottle_id: int,
+    replier_id: int,
+    text: str,
+    is_anonymous: bool = False,
+    file_id: str | None = None,
+    media_type: str | None = None,
+    session: AsyncSession | None = None,
+) -> BottleReply:
+    assert session is not None
+    reply = BottleReply(
+        bottle_id=bottle_id,
+        replier_id=replier_id,
+        text=text,
+        is_anonymous=is_anonymous,
+        file_id=file_id,
+        media_type=media_type,
+    )
+    session.add(reply)
+    await session.flush()
+    return reply
+
+
+@with_session
+async def get_bottle_reply_by_id(
+    reply_id: int, session: AsyncSession | None = None
+) -> BottleReply | None:
+    assert session is not None
+    return await session.get(BottleReply, reply_id)
+
+
+@with_tx
+async def get_bottle_replies(
+    bottle_id: int, session: AsyncSession | None = None
+) -> list[BottleReply]:
+    assert session is not None
+    stmt = (
+        sqlalchemy.select(BottleReply)
+        .where(BottleReply.bottle_id == bottle_id)
+        .order_by(BottleReply.created_at.desc())
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+@with_tx
+async def delete_bottles_by_sender(
+    sender_id: int, session: AsyncSession | None = None
+) -> int:
+    assert session is not None
+    count_stmt = (
+        sqlalchemy.select(sqlalchemy.func.count())
+        .select_from(Bottle)
+        .where(Bottle.sender_id == sender_id)
+    )
+    count_result = await session.execute(count_stmt)
+    count = count_result.scalar() or 0
+    if count > 0:
+        delete_stmt = sqlalchemy.delete(Bottle).where(Bottle.sender_id == sender_id)
+        await session.execute(delete_stmt)
+    return count

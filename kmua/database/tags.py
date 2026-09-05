@@ -5,7 +5,7 @@ import sqlalchemy
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import with_session, with_tx
-from .models import UserTag
+from .models import PendingTagGift, UserTag
 
 _TZ_UTC = datetime.timezone.utc
 
@@ -106,5 +106,84 @@ async def get_expired_tags(
     assert session is not None
     now = datetime.datetime.now(_TZ_UTC)
     stmt = sqlalchemy.select(UserTag).where(UserTag.expires_at < now)
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+
+# ─── PendingTagGift CRUD ─────────────────────────────────
+
+
+@with_tx
+async def create_pending_gift(
+    sender_id: int,
+    sender_name: str,
+    target_id: int,
+    target_name: str,
+    chat_id: int,
+    tag_text: str,
+    expires_at: datetime.datetime,
+    session: AsyncSession | None = None,
+) -> PendingTagGift:
+    assert session is not None
+    gift = PendingTagGift(
+        sender_id=sender_id,
+        sender_name=sender_name,
+        target_id=target_id,
+        target_name=target_name,
+        chat_id=chat_id,
+        tag_text=tag_text,
+        expires_at=expires_at,
+    )
+    session.add(gift)
+    await session.flush()
+    return gift
+
+
+@with_tx
+async def update_gift_message_id(
+    gift_id: int, message_id: int, session: AsyncSession | None = None
+) -> None:
+    assert session is not None
+    stmt = (
+        sqlalchemy.update(PendingTagGift)
+        .where(PendingTagGift.id == gift_id)
+        .values(message_id=message_id)
+    )
+    await session.execute(stmt)
+
+
+@with_session
+async def get_pending_gift(
+    gift_id: int, session: AsyncSession | None = None
+) -> PendingTagGift | None:
+    assert session is not None
+    return await session.get(PendingTagGift, gift_id)
+
+
+@with_tx
+async def complete_pending_gift(
+    gift_id: int, status: str = "accepted", session: AsyncSession | None = None
+) -> None:
+    assert session is not None
+    stmt = (
+        sqlalchemy.update(PendingTagGift)
+        .where(PendingTagGift.id == gift_id, PendingTagGift.status == "pending")
+        .values(status=status)
+    )
+    result = await session.execute(stmt)
+    if result.rowcount == 0:
+        raise ValueError("gift_not_pending")
+
+
+@with_session
+async def get_expired_pending_gifts(
+    session: AsyncSession | None = None,
+) -> Sequence[PendingTagGift]:
+    assert session is not None
+    now = datetime.datetime.now(_TZ_UTC)
+    stmt = sqlalchemy.select(PendingTagGift).where(
+        PendingTagGift.status == "pending",
+        PendingTagGift.expires_at < now,
+    )
     result = await session.execute(stmt)
     return result.scalars().all()

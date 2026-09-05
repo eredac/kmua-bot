@@ -154,7 +154,11 @@ async def init_bot(client: Client = client):
         BotCommand("settag", "🏷 购买/续费个人标签 (100积分/月)"),
         BotCommand("edittag", "✏️ 修改标签内容 (50积分，不重置有效期)"),
         BotCommand("mytag", "🏷 查看我的标签状态"),
+        BotCommand("gifttag", "🎁 赠送标签给他人 (100积分/月)"),
         BotCommand("challenge", "⚔️ 发起积分猜拳挑战 (默认2%/上限5%)"),
+        # Gacha card system
+        BotCommand("gacha", "🃏 集换卡牌菜单"),
+        BotCommand("trade", "🤝 发起卡牌交易 (回复目标用户)"),
     ]
     group_admin_commands = [
         BotCommand("sett", i18n.t("bot.cmd.sett", locale=app_config.lang)),
@@ -165,6 +169,7 @@ async def init_bot(client: Client = client):
         BotCommand("botdemote", i18n.t("bot.cmd.botdemote", locale=app_config.lang)),
         BotCommand("config", i18n.t("bot.cmd.config", locale=app_config.lang)),
         BotCommand("greet", i18n.t("bot.cmd.greet", locale=app_config.lang)),
+        BotCommand("gachaban", "🚫 卡牌系统黑名单管理 (仅owner)"),
     ]
     private_commands = [
         BotCommand("buygift", i18n.t("bot.cmd.buygift", locale=app_config.lang)),
@@ -248,6 +253,10 @@ async def init_bot(client: Client = client):
     # 恢复超时挑战（处理 Bot 重启期间遗留的超时记录）
     from kmua.plugins.challenge import recover_challenges_on_startup
     await recover_challenges_on_startup(client)
+
+    # 恢复待确认的标签赠送
+    from kmua.plugins.tag import recover_gift_on_startup
+    await recover_gift_on_startup(client)
 
     logger.success(i18n.t("log.inited", locale=app_config.lang))
 

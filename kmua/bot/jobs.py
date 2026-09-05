@@ -49,9 +49,8 @@ async def check_tag_expiry():
         expired = await database.get_expired_tags()
         for tag in expired:
             try:
-                await client.set_chat_member_tag(tag.chat_id, tag.user_id, tag="")
-            except AttributeError:
-                logger.debug("set_chat_member_tag 未被当前客户端库支持，跳过清除")
+                from kmua.plugins.tag import _set_chat_member_tag
+                await _set_chat_member_tag(client, tag.chat_id, tag.user_id, "")
             except Exception as e:
                 logger.debug(f"清除过期标签失败: user={tag.user_id}, chat={tag.chat_id}: {e}")
 

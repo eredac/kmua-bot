@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "f5e6g7h8i9j0"
-down_revision: str | None = "a1b2c3d4e5f6"
+down_revision: str | None = "aa1bb2cc3dd4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -24,7 +24,7 @@ def upgrade() -> None:
     insp = sa.inspect(bind)
 
     table_name = "bottle_replies"
-    if insp.has_table(table_name):
+    if insp.has_table(table_name, schema="kmua"):
         return
 
     op.create_table(
@@ -47,30 +47,33 @@ def upgrade() -> None:
             server_default=sa.text("(CURRENT_TIMESTAMP)"),
             nullable=False,
         ),
-        sa.ForeignKeyConstraint(["bottle_id"], ["bottles.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["replier_id"], ["user_data.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(["bottle_id"], ["kmua.bottles.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["replier_id"], ["shared.user_data.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
+        schema="kmua",
     )
     op.create_index(
-        op.f("ix_bottle_replies_id"), "bottle_replies", ["id"], unique=False
+        op.f("ix_bottle_replies_id"), "bottle_replies", ["id"], unique=False, schema="kmua"
     )
     op.create_index(
         op.f("ix_bottle_replies_bottle_id"),
         "bottle_replies",
         ["bottle_id"],
         unique=False,
+        schema="kmua",
     )
     op.create_index(
         op.f("ix_bottle_replies_replier_id"),
         "bottle_replies",
         ["replier_id"],
         unique=False,
+        schema="kmua",
     )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_index(op.f("ix_bottle_replies_replier_id"), table_name="bottle_replies")
-    op.drop_index(op.f("ix_bottle_replies_bottle_id"), table_name="bottle_replies")
-    op.drop_index(op.f("ix_bottle_replies_id"), table_name="bottle_replies")
-    op.drop_table("bottle_replies")
+    op.drop_index(op.f("ix_bottle_replies_replier_id"), table_name="bottle_replies", schema="kmua")
+    op.drop_index(op.f("ix_bottle_replies_bottle_id"), table_name="bottle_replies", schema="kmua")
+    op.drop_index(op.f("ix_bottle_replies_id"), table_name="bottle_replies", schema="kmua")
+    op.drop_table("bottle_replies", schema="kmua")

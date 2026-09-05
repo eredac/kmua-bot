@@ -31,12 +31,17 @@ class Base(DeclarativeBase):
 class UserConfig:
     lang: str = "zh-CN"
     coins: int = 144 * 16
+    affection: int = 0
 
     @classmethod
     def from_dict(cls, data: dict | None) -> "UserConfig":
         if data is None:
             return cls()
-        return cls(lang=data.get("lang", "zh-CN"), coins=data.get("coins", 144 * 16))
+        return cls(
+            lang=data.get("lang", "zh-CN"),
+            coins=data.get("coins", 144 * 16),
+            affection=data.get("affection", 0),
+        )
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -53,6 +58,7 @@ class ChatConfig:
     title_permissions: dict | None = None
     greeting: str | None = None
     ai_reply: bool = True
+    ai_comment: bool = True
     setu_enabled: bool = True
     convert_b23_enabled: bool = True
     parse_artwork_enabled: bool = True
@@ -77,6 +83,7 @@ class ChatConfig:
             title_permissions=data.get("title_permissions", {}),
             greeting=data.get("greeting", None),
             ai_reply=data.get("ai_reply", True),
+            ai_comment=data.get("ai_comment", True),
             setu_enabled=data.get("setu_enabled", True),
             convert_b23_enabled=data.get("convert_b23_enabled", False),
             parse_artwork_enabled=data.get("parse_artwork_enabled", True),
@@ -777,6 +784,263 @@ class UserTag(Base):
         return f"<UserTag(user_id={self.user_id}, chat_id={self.chat_id}, tag='{self.tag_text}', expires_at={self.expires_at})>"
 
 
+class PendingTagGift(Base):
+    """待确认的标签赠送记录"""
+
+    __tablename__ = "pending_tag_gift"
+    __table_args__ = {"schema": "shared"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sender_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sender_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    target_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    target_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    tag_text: Mapped[str] = mapped_column(String(32), nullable=False)
+    message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class CardSeason(Base):
+    """卡牌赛季表"""
+
+    __tablename__ = "card_season"
+    __table_args__ = {"schema": "kmua"}
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, index=True
+    )
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    total_cards: Mapped[int] = mapped_column(Integer, nullable=False, default=32)
+    draw_price: Mapped[int] = mapped_column(Integer, nullable=False, default=15)
+    daily_free_draws: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    pity_legendary: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
+    pity_dedup: Mapped[int] = mapped_column(Integer, nullable=False, default=80)
+    redeem_reward: Mapped[int] = mapped_column(Integer, nullable=False, default=1000)
+    trade_fee: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="active"
+    )
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"<CardSeason(id={self.id}, name='{self.name}', status='{self.status}')>"
+
+
+class CardDefinition(Base):
+    """卡牌定义表（每期卡池中的卡牌）"""
+
+    __tablename__ = "card_definition"
+    __table_args__ = {"schema": "kmua"}
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, index=True
+    )
+    season_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("kmua.card_season.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    card_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    rarity: Mapped[str] = mapped_column(String(20), nullable=False)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    image_file_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"<CardDefinition(id={self.id}, season={self.season_id}, #{self.card_number} '{self.name}' [{self.rarity}])>"
+
+
+class UserCard(Base):
+    """用户持有卡牌表"""
+
+    __tablename__ = "user_card"
+    __table_args__ = {"schema": "kmua"}
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.user_data.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.chat_data.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    card_def_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("kmua.card_definition.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    season_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("kmua.card_season.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    obtained_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserCard(id={self.id}, user={self.user_id}, card_def={self.card_def_id})>"
+
+
+class CardDrawRecord(Base):
+    """抽卡记录（用于保底计数）"""
+
+    __tablename__ = "card_draw_record"
+    __table_args__ = {"schema": "kmua"}
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.user_data.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.chat_data.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    season_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("kmua.card_season.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    card_def_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("kmua.card_definition.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    is_free: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    pity_triggered: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    draw_date: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"<CardDrawRecord(id={self.id}, user={self.user_id}, card={self.card_def_id})>"
+
+
+class CardTradeRequest(Base):
+    """卡牌交易请求"""
+
+    __tablename__ = "card_trade_request"
+    __table_args__ = {"schema": "kmua"}
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, index=True
+    )
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.chat_data.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sender_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.user_data.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    receiver_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.user_data.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sender_card_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("kmua.user_card.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    receiver_card_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("kmua.user_card.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    season_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("kmua.card_season.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending"
+    )
+    message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"<CardTradeRequest(id={self.id}, sender={self.sender_id}, receiver={self.receiver_id}, status='{self.status}')>"
+
+
+class CardAlbum(Base):
+    """永久图鉴记录"""
+
+    __tablename__ = "card_album"
+    __table_args__ = (
+        UniqueConstraint("user_id", "card_def_id", name="uq_album_user_card"),
+        {"schema": "kmua"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.user_data.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    card_def_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("kmua.card_definition.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    season_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("kmua.card_season.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    first_obtained_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"<CardAlbum(id={self.id}, user={self.user_id}, card_def={self.card_def_id})>"
+
+
 class ChallengeRecord(Base):
     """积分挑战记录表（猜拳对决）"""
 
@@ -835,3 +1099,41 @@ class ChallengeRecord(Base):
             f"<ChallengeRecord(id={self.id}, chat={self.chat_id}, "
             f"challenger={self.challenger_id}, status='{self.status}')>"
         )
+
+
+class UserTokuten(Base):
+    """用户特典解锁记录 (per user, per chat, per season)"""
+
+    __tablename__ = "user_tokuten"
+    __table_args__ = (
+        UniqueConstraint("user_id", "chat_id", "season_id", name="uq_user_tokuten_chat"),
+        {"schema": "kmua"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.user_data.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("shared.chat_data.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    season_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("kmua.card_season.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    unlocked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserTokuten(id={self.id}, user={self.user_id}, chat={self.chat_id}, season={self.season_id})>"

@@ -187,9 +187,16 @@ async def manage_quote_text_index() -> None:
 
             if not has_gin_idx:
                 logger.info("Creating pg_trgm extension and index for quotes.text...")
-                await conn.execute(
-                    sqlalchemy.text("CREATE EXTENSION IF NOT EXISTS pg_trgm")
-                )
+                try:
+                    await conn.execute(
+                        sqlalchemy.text("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Could not create pg_trgm extension (may need superuser): {e}. "
+                        "Skipping GIN index creation; text search will fall back to ILIKE."
+                    )
+                    return
                 await conn.execute(
                     sqlalchemy.text(
                         "CREATE INDEX idx_quotes_text_gin_trgm ON quotes USING gin (text gin_trgm_ops)"

@@ -42,6 +42,7 @@ class AffectionHistogram(Base):
 
     __table_args__ = (
         CheckConstraint("cnt >= 0", name="ck_affection_histogram_cnt_non_negative"),
+        {"schema": "kmua"},
     )
 
     def __repr__(self) -> str:
@@ -137,7 +138,7 @@ async def rebuild_histogram(session: AsyncSession | None = None) -> int:
 
     if runtime_config.db_is_postgres:
         await session.execute(
-            text("ALTER TABLE user_data DISABLE TRIGGER trg_update_affection_histogram")
+            text("ALTER TABLE shared.user_data DISABLE TRIGGER trg_update_affection_histogram")
         )
 
     await session.execute(sqlalchemy.delete(AffectionHistogram))
@@ -156,7 +157,7 @@ async def rebuild_histogram(session: AsyncSession | None = None) -> int:
 
     if runtime_config.db_is_postgres:
         await session.execute(
-            text("ALTER TABLE user_data ENABLE TRIGGER trg_update_affection_histogram")
+            text("ALTER TABLE shared.user_data ENABLE TRIGGER trg_update_affection_histogram")
         )
 
     logger.info("Histogram rebuilt")
@@ -170,7 +171,7 @@ async def install_postgres_trigger() -> None:
     async with engine.begin() as conn:
         await conn.execute(
             text("""
-        CREATE OR REPLACE FUNCTION affection_bucket(x INT)
+        CREATE OR REPLACE FUNCTION kmua.affection_bucket(x INT)
         RETURNS INT IMMUTABLE AS $$
         BEGIN
             IF x < -200 THEN RETURN x / 50;
@@ -187,7 +188,7 @@ async def install_postgres_trigger() -> None:
 
         await conn.execute(
             text("""
-CREATE OR REPLACE FUNCTION update_affection_histogram()
+CREATE OR REPLACE FUNCTION kmua.update_affection_histogram()
 RETURNS trigger AS $$
 DECLARE
     old_aff INT;
@@ -197,21 +198,21 @@ DECLARE
 BEGIN
     IF TG_OP = 'INSERT' THEN
         new_aff := COALESCE((NEW.config->>'affection')::int, 0);
-        new_bucket := affection_bucket(new_aff);
+        new_bucket := kmua.affection_bucket(new_aff);
 
-        INSERT INTO affection_histogram(bucket, cnt)
+        INSERT INTO kmua.affection_histogram(bucket, cnt)
         VALUES (new_bucket, 1)
         ON CONFLICT (bucket)
-        DO UPDATE SET cnt = affection_histogram.cnt + 1;
+        DO UPDATE SET cnt = kmua.affection_histogram.cnt + 1;
 
         RETURN NEW;
     END IF;
 
     IF TG_OP = 'DELETE' THEN
         old_aff := COALESCE((OLD.config->>'affection')::int, 0);
-        old_bucket := affection_bucket(old_aff);
+        old_bucket := kmua.affection_bucket(old_aff);
 
-        UPDATE affection_histogram
+        UPDATE kmua.affection_histogram
         SET cnt = GREATEST(cnt - 1, 0)
         WHERE bucket = old_bucket;
 
@@ -227,17 +228,17 @@ BEGIN
         RETURN NEW;
     END IF;
 
-    old_bucket := affection_bucket(COALESCE(old_aff, 0));
-    new_bucket := affection_bucket(COALESCE(new_aff, 0));
+    old_bucket := kmua.affection_bucket(COALESCE(old_aff, 0));
+    new_bucket := kmua.affection_bucket(COALESCE(new_aff, 0));
 
-    UPDATE affection_histogram
+    UPDATE kmua.affection_histogram
     SET cnt = GREATEST(cnt - 1, 0)
     WHERE bucket = old_bucket;
 
-    INSERT INTO affection_histogram(bucket, cnt)
+    INSERT INTO kmua.affection_histogram(bucket, cnt)
     VALUES (new_bucket, 1)
     ON CONFLICT (bucket)
-    DO UPDATE SET cnt = affection_histogram.cnt + 1;
+    DO UPDATE SET cnt = kmua.affection_histogram.cnt + 1;
 
     RETURN NEW;
 END;
@@ -246,16 +247,16 @@ $$ LANGUAGE plpgsql;
         )
 
         await conn.execute(
-            text("DROP TRIGGER IF EXISTS trg_update_affection_histogram ON user_data;")
+            text("DROP TRIGGER IF EXISTS trg_update_affection_histogram ON shared.user_data;")
         )
 
         await conn.execute(
             text("""
 CREATE TRIGGER trg_update_affection_histogram
 AFTER INSERT OR DELETE OR UPDATE
-ON user_data
+ON shared.user_data
 FOR EACH ROW
-EXECUTE FUNCTION update_affection_histogram();
+EXECUTE FUNCTION kmua.update_affection_histogram();
             """)
         )
 
@@ -371,10 +372,10 @@ async def uninstall_postgres_trigger() -> None:
 
     async with engine.begin() as conn:
         await conn.execute(
-            text("DROP TRIGGER IF EXISTS trg_update_affection_histogram ON user_data;")
+            text("DROP TRIGGER IF EXISTS trg_update_affection_histogram ON shared.user_data;")
         )
-        await conn.execute(text("DROP FUNCTION IF EXISTS update_affection_histogram;"))
-        await conn.execute(text("DROP FUNCTION IF EXISTS affection_bucket;"))
+        await conn.execute(text("DROP FUNCTION IF EXISTS kmua.update_affection_histogram;"))
+        await conn.execute(text("DROP FUNCTION IF EXISTS kmua.affection_bucket;"))
         logger.info("PostgreSQL affection histogram trigger uninstalled")
 
 

@@ -3,19 +3,21 @@
 
 /challenge [积分] - 发起积分挑战
   · 回复某人消息 → 指定对战；直接发送 → 开放挑战（任何人可接受）
-  · 积分参数可选；默认为总分 2%，上限为总分 5%
+  · 积分参数可选；默认为总分 2%，上限为总分 5%，最低 2 积分
   · 每天最多发起 3 次（每天 4:00 重置）
 
 积分扣除时机：
-  · 发起时：仅扣手续费（赌注暂不扣）
-  · 接受时：双方各扣赌注，接受方同时扣手续费
+  · 接受时：双方各扣赌注
 
-手续费规则（赌注 > 10 时生效）：
-  · 发起方 12%，接受方 8%
-  · 发起方手续费在发起时扣除，无论是否有人接受均不退还
+累进税率（税基为对方赌注，从赢家奖金中扣除，防止小号刷分）：
+  · 赌注 <50：50%    赌注 50-99：40%    赌注 100-199：30%
+  · 赌注 200-499：25%  赌注 500+：20%
+  · 平局也收税，双方平分
+
+每日次数限制（发起 + 接受均计入，每天 3 次）
 
 超时规则：
-  · 发起后 30 分钟无人接受 → 自动取消（无需退款，赌注本来就没扣）
+  · 发起后 30 分钟无人接受 → 自动取消
   · 接受后 30 分钟未全部出拳 → 未出拳方随机出拳，正常结算
 """
 import asyncio
@@ -42,9 +44,7 @@ _TZ_CST = timezone(timedelta(hours=8))
 _DAILY_LIMIT = 3
 _DEFAULT_BET_RATIO = 0.02
 _MAX_BET_RATIO = 0.05
-_COMMISSION_THRESHOLD = 10
-_CHALLENGER_COMMISSION_RATIO = 0.12
-_CHALLENGEE_COMMISSION_RATIO = 0.08
+_MIN_BET = 2                   # 最低赌注
 _PENDING_TIMEOUT_SECS = 1800  # 发起后 30 分钟无人接受则取消
 _RPS_TIMEOUT_SECS = 1800      # 接受后 30 分钟未全部出拳则随机
 
@@ -61,10 +61,24 @@ _rps_timers: dict[int, asyncio.Task] = {}
 # ─── 工具函数 ──────────────────────────────────────────────
 
 
-def _calc_commission(bet: int, ratio: float) -> int:
-    if bet <= _COMMISSION_THRESHOLD:
-        return 0
-    return round(bet * ratio)
+def _calc_tax_rate(bet: int) -> float:
+    """赌注越大税率越低，防止小号刷分
+    税基为对方赌注（即 bet），不是总奖池
+    """
+    if bet < 50:
+        return 0.50
+    if bet < 100:
+        return 0.40
+    if bet < 200:
+        return 0.30
+    if bet < 500:
+        return 0.25
+    return 0.20
+
+
+def _calc_tax(bet: int) -> int:
+    """计算赢家需缴纳的税额（从赢得的对方赌注中扣除）"""
+    return max(1, round(bet * _calc_tax_rate(bet)))
 
 
 def _rps_result(choice_a: str, choice_b: str) -> int:
@@ -90,15 +104,13 @@ def _pending_text(
     challenger_name: str,
     challengee_name: str | None,
     bet: int,
-    commission_a: int,
 ) -> str:
     target = f"<b>{challengee_name}</b>" if challengee_name else "所有人"
-    commission_note = (
-        f"\n💸 手续费（已扣）：{commission_a} 积分" if commission_a > 0 else ""
-    )
+    tax_rate = _calc_tax_rate(bet)
+    tax_pct = round(tax_rate * 100)
     return (
         f"⚔️ <b>{challenger_name}</b> 向 {target} 发起积分猜拳挑战！\n"
-        f"💰 赌注：<b>{bet}</b> 积分{commission_note}\n"
+        f"💰 赌注：<b>{bet}</b> 积分（税率 {tax_pct}%）\n"
         f"⏰ 有效期：30 分钟\n\n"
         f"点击按钮接受挑战喵～"
     )
@@ -135,12 +147,17 @@ def _result_text(
     c_icon = f"{_CHOICE_EMOJI[c_choice]} {_CHOICE_LABEL[c_choice]}"
     e_icon = f"{_CHOICE_EMOJI[e_choice]} {_CHOICE_LABEL[e_choice]}"
     auto_note = "⏰ 超时，随机出拳！\n\n" if timeout_auto else ""
+    tax = _calc_tax(bet)
+    net_win = bet - tax
+    tax_pct = round(_calc_tax_rate(bet) * 100)
+    half_tax = max(1, tax // 2)
+    refund = bet - half_tax
     if result == 0:
-        outcome = f"🤝 <b>平局！</b> 双方各取回 {bet} 积分（手续费不退）"
+        outcome = f"🤝 <b>平局！</b> 双方各扣税 {half_tax}，退回 {refund} 积分"
     elif result == 1:
-        outcome = f"🏆 <b>{c_name}</b> 获胜！赢得对方 {bet} 积分！"
+        outcome = f"🏆 <b>{c_name}</b> 获胜！赢得 {net_win} 积分（税 {tax_pct}%: -{tax}）"
     else:
-        outcome = f"🏆 <b>{e_name}</b> 获胜！赢得对方 {bet} 积分！"
+        outcome = f"🏆 <b>{e_name}</b> 获胜！赢得 {net_win} 积分（税 {tax_pct}%: -{tax}）"
     return (
         f"{auto_note}"
         f"⚔️ <b>{c_name}</b> vs <b>{e_name}</b>\n\n"
@@ -195,19 +212,28 @@ async def _do_resolve(
         async with AsyncSessionFactory() as session:
             async with session.begin():
                 await database.complete_challenge(challenge_id, winner_id, session=session)
+                tax = _calc_tax(record.bet_amount)
                 if result == 0:
-                    await database.add_points(
-                        record.challenger_id, record.chat_id, record.bet_amount,
-                        reason=f"猜拳平局取回赌注 #{challenge_id}", session=session,
-                    )
-                    await database.add_points(
-                        record.challengee_id, record.chat_id, record.bet_amount,
-                        reason=f"猜拳平局取回赌注 #{challenge_id}", session=session,
-                    )
+                    # 平局：双方平分税，各退 bet - tax/2
+                    half_tax = max(1, tax // 2)
+                    refund = record.bet_amount - half_tax
+                    if refund > 0:
+                        await database.add_points(
+                            record.challenger_id, record.chat_id, refund,
+                            reason=f"猜拳平局退还 #{challenge_id}（税 {half_tax}）",
+                            session=session,
+                        )
+                        await database.add_points(
+                            record.challengee_id, record.chat_id, refund,
+                            reason=f"猜拳平局退还 #{challenge_id}（税 {half_tax}）",
+                            session=session,
+                        )
                 else:
+                    # 赢家拿回自己赌注 + 对方赌注扣税后的部分
+                    payout = record.bet_amount * 2 - tax
                     await database.add_points(
-                        winner_id, record.chat_id, record.bet_amount * 2,
-                        reason=f"猜拳获胜 #{challenge_id}", session=session,
+                        winner_id, record.chat_id, payout,
+                        reason=f"猜拳获胜 #{challenge_id}（税 {tax}）", session=session,
                     )
     except ValueError:
         return  # 并发情况下已被另一协程结算，忽略
@@ -406,18 +432,18 @@ async def challenge_handler(client: Client, message: Message) -> None:
         return
 
     # 计算赌注上限与默认值
-    max_bet = max(1, round(total_points * _MAX_BET_RATIO))
-    default_bet = max(1, round(total_points * _DEFAULT_BET_RATIO))
+    max_bet = max(_MIN_BET, round(total_points * _MAX_BET_RATIO))
+    default_bet = max(_MIN_BET, round(total_points * _DEFAULT_BET_RATIO))
 
     # 解析可选赌注参数
     args = message.text.split(maxsplit=1)
     if len(args) >= 2:
         try:
             bet_amount = int(args[1].strip())
-            if bet_amount <= 0:
+            if bet_amount < _MIN_BET:
                 raise ValueError
         except ValueError:
-            await message.reply_text("⚠️ 赌注必须是正整数喵～")
+            await message.reply_text(f"⚠️ 赌注最低 {_MIN_BET} 积分喵～")
             return
         if bet_amount > max_bet:
             await message.reply_text(
@@ -428,39 +454,27 @@ async def challenge_handler(client: Client, message: Message) -> None:
     else:
         bet_amount = default_bet
 
-    # 计算手续费
-    commission_a = _calc_commission(bet_amount, _CHALLENGER_COMMISSION_RATIO)
-    commission_b = _calc_commission(bet_amount, _CHALLENGEE_COMMISSION_RATIO)
-
-    # 验证：余额 ≥ 赌注 + 手续费（接受时才真正扣赌注，但提前验证避免无效挑战）
-    need_total = bet_amount + commission_a
-    if total_points < need_total:
+    # 验证余额 ≥ 赌注
+    if total_points < bet_amount:
         await message.reply_text(
-            f"⚠️ 积分不足！需要 <b>{need_total}</b> 积分"
-            f"（赌注 {bet_amount} + 手续费 {commission_a}），"
+            f"⚠️ 积分不足！需要 <b>{bet_amount}</b> 积分，"
             f"当前积分：<b>{total_points}</b>",
             parse_mode=ParseMode.HTML,
         )
         return
 
-    # 发起时只扣手续费（赌注接受时扣）
+    # 发起挑战（赌注在接受时双方同时扣除）
     expires_at = _now_utc() + timedelta(seconds=_PENDING_TIMEOUT_SECS)
     try:
         async with AsyncSessionFactory() as session:
             async with session.begin():
-                if commission_a > 0:
-                    await database.cost_points(
-                        challenger_id, chat_id, commission_a,
-                        reason=f"发起积分挑战手续费（赌注 {bet_amount}）",
-                        session=session,
-                    )
                 record = await database.create_challenge(
                     chat_id=chat_id,
                     challenger_id=challenger_id,
                     challengee_id=challengee_id,
                     bet_amount=bet_amount,
-                    challenger_commission=commission_a,
-                    challengee_commission=commission_b,
+                    challenger_commission=0,
+                    challengee_commission=0,
                     expires_at=expires_at,
                     session=session,
                 )
@@ -470,7 +484,7 @@ async def challenge_handler(client: Client, message: Message) -> None:
         return
 
     # 发送挑战消息并回填 message_id
-    text = _pending_text(challenger_name, challengee_name, bet_amount, commission_a)
+    text = _pending_text(challenger_name, challengee_name, bet_amount)
     reply = await message.reply_text(
         text, reply_markup=_pending_keyboard(challenge_id), parse_mode=ParseMode.HTML
     )
@@ -506,6 +520,14 @@ async def on_accept_challenge(client: Client, callback: CallbackQuery) -> None:
     if accepter_id == record.challenger_id:
         await callback.answer("⚠️ 不能接受自己的挑战喵～", show_alert=True)
         return
+    # 接受方每日次数检查
+    accepter_count = await database.get_daily_challenge_count(accepter_id, record.chat_id)
+    if accepter_count >= _DAILY_LIMIT:
+        await callback.answer(
+            f"⚠️ 今日参与挑战次数已达上限（{_DAILY_LIMIT} 次），明天再来喵～",
+            show_alert=True,
+        )
+        return
     if record.challengee_id is not None and accepter_id != record.challengee_id:
         await callback.answer("⚠️ 这是指定挑战，只有被指定的人才能接受喵～", show_alert=True)
         return
@@ -522,17 +544,15 @@ async def on_accept_challenge(client: Client, callback: CallbackQuery) -> None:
 
     e_points_obj = await database.get_user_points(accepter_id, record.chat_id)
     accepter_points = e_points_obj.points if e_points_obj else 0
-    need_e = record.bet_amount + record.challengee_commission
-    if accepter_points < need_e:
+    if accepter_points < record.bet_amount:
         await callback.answer(
-            f"⚠️ 积分不足！需要 {need_e} 积分"
-            f"（赌注 {record.bet_amount} + 手续费 {record.challengee_commission}），"
+            f"⚠️ 积分不足！需要 {record.bet_amount} 积分，"
             f"当前积分：{accepter_points}",
             show_alert=True,
         )
         return
 
-    # 原子：双方同时扣赌注 + 接受方扣手续费，更新状态
+    # 原子：双方同时扣赌注，更新状态
     new_expires_at = _now_utc() + timedelta(seconds=_RPS_TIMEOUT_SECS)
     try:
         async with AsyncSessionFactory() as session:
@@ -543,8 +563,8 @@ async def on_accept_challenge(client: Client, callback: CallbackQuery) -> None:
                     session=session,
                 )
                 await database.cost_points(
-                    accepter_id, record.chat_id, need_e,
-                    reason=f"接受积分挑战 #{challenge_id}（赌注 {record.bet_amount}，手续费 {record.challengee_commission}）",
+                    accepter_id, record.chat_id, record.bet_amount,
+                    reason=f"接受积分挑战赌注 #{challenge_id}",
                     session=session,
                 )
                 await database.accept_challenge(

@@ -66,6 +66,13 @@ async def on_cb(client: Client, callback_query: CallbackQuery):
         logger.debug(callback_query)
     user = callback_query.from_user
     if not callback_query.message:
+        # inline 消息的 callback 没有 message，放行 gacha/trade 相关回调
+        if callback_query.data and (
+            callback_query.data.startswith("gc_")
+            or callback_query.data.startswith("trade_")
+        ):
+            return
+        callback_query.stop_propagation()
         return
     chat = callback_query.message.chat
     if user is None or chat is None:

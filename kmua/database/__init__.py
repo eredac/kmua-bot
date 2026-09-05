@@ -12,3 +12,4 @@ from .checkin import *  # noqa
 from .pending_state import *  # noqa
 from .tags import *  # noqa
 from .challenge import *  # noqa
+from .gacha import *  # noqa

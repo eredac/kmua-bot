@@ -25,10 +25,21 @@ class _TaskScheduler:
 
     def __init__(self):
         # 配置持久化存储和内存回退存储
-        jobstores = {
-            "default": SQLAlchemyJobStore(
+        # 使用 kmua schema，因为 kmua_user 对 public schema 没有 CREATE 权限
+        try:
+            default_store = SQLAlchemyJobStore(
                 engine=sync_engine,
-            ),
+                tableschema="kmua",
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to initialize SQLAlchemyJobStore: {e}. "
+                "Falling back to MemoryJobStore for all jobs."
+            )
+            default_store = MemoryJobStore()
+
+        jobstores = {
+            "default": default_store,
             "memory": MemoryJobStore(),  # 内存回退存储
         }
         self._scheduler = AsyncIOScheduler(jobstores=jobstores)
@@ -67,29 +78,25 @@ class _TaskScheduler:
                 jobstore="default",
             )
             return job
-        except ValueError as e:
-            if "cannot be serialized" in str(e) or "could not be determined" in str(e):
-                # 无法序列化，回退到内存存储
-                logger.warning(
-                    f"Job '{id}' cannot be serialized for persistent storage. "
-                    f"Falling back to memory storage. Error: {e}"
-                )
-                job = self._scheduler.add_job(
-                    func=func,
-                    trigger=trigger,
-                    id=f"{id}_memory",
-                    args=args or [],
-                    kwargs=kwargs or {},
-                    replace_existing=replace_existing,
-                    jobstore="memory",
-                )
-                logger.info(
-                    f"Job '{id}' added to memory storage (will NOT survive restart)"
-                )
-                return job
-            else:
-                # 其他错误，重新抛出
-                raise
+        except Exception as e:
+            # 持久化存储失败（权限不足、序列化失败等），回退到内存存储
+            logger.warning(
+                f"Job '{id}' failed to add to persistent storage: "
+                f"{e.__class__.__name__}: {e}. Falling back to memory storage."
+            )
+            job = self._scheduler.add_job(
+                func=func,
+                trigger=trigger,
+                id=f"{id}_memory",
+                args=args or [],
+                kwargs=kwargs or {},
+                replace_existing=replace_existing,
+                jobstore="memory",
+            )
+            logger.info(
+                f"Job '{id}' added to memory storage (will NOT survive restart)"
+            )
+            return job
 
     def start(self) -> None:
         """启动调度器
@@ -97,7 +104,21 @@ class _TaskScheduler:
         APScheduler 会自动从数据库恢复已保存的任务
         """
         if not self._scheduler.running:
-            self._scheduler.start()
+            try:
+                self._scheduler.start()
+            except Exception as e:
+                logger.error(
+                    f"Failed to start scheduler with default jobstore: {e}. "
+                    "Retrying with memory-only storage..."
+                )
+                # 用纯内存存储重建调度器
+                self._scheduler = AsyncIOScheduler(
+                    jobstores={"default": MemoryJobStore(), "memory": MemoryJobStore()}
+                )
+                self._scheduler.start()
+                logger.warning("Job scheduler started with memory-only storage (jobs will NOT survive restart)")
+                return
+
             # 检查持久化存储状态
             jobstore = self._scheduler._jobstores.get("default")
             if jobstore:

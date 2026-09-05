@@ -207,7 +207,9 @@ async def _handle_slot_checkin(
         f"当前积分：<b>{user_points.points}</b>",
         parse_mode=ParseMode.HTML,
     )
-    asyncio.create_task(_auto_delete(reply))
+    # 安慰奖自动删除，中奖消息保留
+    if points <= _SLOT_DEFAULT_POINTS:
+        asyncio.create_task(_auto_delete(reply))
     logger.info(
         f"老虎机签到: user={user_id}, chat={chat_id}, "
         f"slot_value={value}, points=+{points}, total={user_points.points}"

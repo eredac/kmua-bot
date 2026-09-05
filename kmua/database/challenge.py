@@ -86,17 +86,29 @@ async def get_daily_challenge_count(
     chat_id: int,
     session: AsyncSession | None = None,
 ) -> int:
-    """获取用户今日（CST）在指定群组发起的有效挑战次数（排除已过期/取消的）"""
+    """获取用户今日（CST）在指定群组参与的有效挑战次数（发起+已接受，排除已过期/取消的）
+    作为发起者：所有非过期/取消的都计入
+    作为接受者：仅计入已实际接受的（pending_rps/completed）
+    """
     assert session is not None
     today_start = _today_cst_start()
-    stmt = sqlalchemy.select(sqlalchemy.func.count()).where(
+    # 作为发起者
+    as_challenger = sqlalchemy.select(sqlalchemy.func.count()).where(
         ChallengeRecord.challenger_id == user_id,
         ChallengeRecord.chat_id == chat_id,
         ChallengeRecord.created_at >= today_start,
         ChallengeRecord.status.not_in(["expired", "cancelled"]),
     )
-    result = await session.execute(stmt)
-    return result.scalar_one()
+    # 作为接受者（仅已接受的）
+    as_challengee = sqlalchemy.select(sqlalchemy.func.count()).where(
+        ChallengeRecord.challengee_id == user_id,
+        ChallengeRecord.chat_id == chat_id,
+        ChallengeRecord.created_at >= today_start,
+        ChallengeRecord.status.in_(["pending_rps", "completed"]),
+    )
+    r1 = await session.execute(as_challenger)
+    r2 = await session.execute(as_challengee)
+    return r1.scalar_one() + r2.scalar_one()
 
 
 @with_tx

@@ -44,19 +44,6 @@ async def inline_query_handler(client: Client, query: types.InlineQuery):
         # 始终展示两个选项，实际的按群限制在 chosen_inline_result 阶段执行
         results.append(
             types.InlineQueryResultArticle(
-                id="daily_checkin",
-                title="📅 每日签到",
-                description="固定获得 5 积分（每天限一次）",
-                input_message_content=types.InputTextMessageContent(
-                    message_text="⏳ 正在签到...",
-                ),
-                reply_markup=types.InlineKeyboardMarkup(
-                    [[types.InlineKeyboardButton(text="⏳", callback_data="noop")]]
-                ),
-            )
-        )
-        results.append(
-            types.InlineQueryResultArticle(
                 id="slot_checkin",
                 title="🎰 老虎机签到",
                 description=f"摇老虎机获得随机积分（每天最多 {_SLOT_MAX_DAILY} 次）",
@@ -68,16 +55,34 @@ async def inline_query_handler(client: Client, query: types.InlineQuery):
                 ),
             )
         )
+        results.append(
+            types.InlineQueryResultArticle(
+                id="daily_checkin",
+                title="📅 每日签到",
+                description="固定获得 5 积分（每天限一次）",
+                input_message_content=types.InputTextMessageContent(
+                    message_text="⏳ 正在签到...",
+                ),
+                reply_markup=types.InlineKeyboardMarkup(
+                    [[types.InlineKeyboardButton(text="⏳", callback_data="noop")]]
+                ),
+            )
+        )
 
     await query.answer(
         results=results,
+        cache_time=0,
+        is_personal=True,
         switch_pm_text=i18n.t("bot.inline.switch_pm_text", locale=user_config.lang),
         switch_pm_parameter="inline_query",
     )
+    logger.debug(f"Inline query answered with {len(results)} results for user {user.id}")
 
 
 @Client.on_chosen_inline_result()
 async def chosen_inline_result(client: Client, result: types.ChosenInlineResult):
+    import time
+    _cir_t0 = time.time()
     user = result.from_user
     logger.info(f"chosen_inline_result: result_id={result.result_id}, inline_message_id={result.inline_message_id!r}, user={user.id}")
     info = None
@@ -183,6 +188,8 @@ async def _handle_checkin(client, result, user, info):
             ),
             parse_mode=enums.ParseMode.HTML,
         )
-        asyncio.create_task(
-            _delete_after(client, info.chat_id, info.message_id, _AUTO_DELETE_DELAY)
-        )
+        # 安慰奖自动删除，中奖消息保留
+        if points <= 1:
+            asyncio.create_task(
+                _delete_after(client, info.chat_id, info.message_id, _AUTO_DELETE_DELAY)
+            )

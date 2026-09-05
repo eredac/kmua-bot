@@ -32,6 +32,8 @@ from kmua import database
 from kmua.config import app_config
 from kmua.database.gacha import RARITY_LABELS
 from kmua.logger import logger
+from kmua.common.message_queue import enqueue_message_operation, get_queue_size
+from kmua.common.animation_cache import get_single_draw_animation
 
 _AUTO_DELETE_DELAY = 30
 _drawing_locks: set[str] = set()  # 防重复点击: "{user_id}_{action}"
@@ -654,8 +656,12 @@ async def _edit_text(client: Client, callback: CallbackQuery, text: str, reply_m
             await client.send_message(**send_kwargs)
         else:
             # 从文本切换到文本：直接编辑
-            await callback.message.edit_text(
-                text, parse_mode=ParseMode.HTML, reply_markup=reply_markup
+            await enqueue_message_operation(
+                callback.message.chat.id,
+                callback.message.edit_text,
+                text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
             )
     else:
         await client.edit_inline_text(
@@ -910,9 +916,16 @@ async def _cb_draw_inner(client, callback, user_id, chat_id, topic_msg):
     player_name = callback.from_user.first_name if callback.from_user else "旅行者"
     draw_caption = f"🎴 <b>{player_name} 的抽卡结果</b>\n{emoji}【{rarity_name}】{card.name}{pity_text}"
     try:
-        mp4_bytes = await asyncio.to_thread(
-            _generate_single_draw_mp4, card.card_number, season.id
-        )
+        # 优先使用预生成的动画缓存
+        mp4_bytes = get_single_draw_animation(season.id, card.card_number)
+
+        # 如果缓存不存在，实时生成（降级方案）
+        if not mp4_bytes:
+            logger.info(f"[gacha] Cache miss for card {card.card_number}, generating on-the-fly")
+            mp4_bytes = await asyncio.to_thread(
+                _generate_single_draw_mp4, card.card_number, season.id
+            )
+
         if mp4_bytes:
             mp4_io = io.BytesIO(mp4_bytes)
             mp4_io.name = "single_draw.mp4"
@@ -1214,7 +1227,9 @@ async def _cb_collection(client: Client, callback: CallbackQuery, user_id: int, 
 
     is_media_msg = callback.message and (callback.message.photo or callback.message.animation or callback.message.document)
     if is_media_msg:
-        await callback.message.edit_media(
+        await enqueue_message_operation(
+            chat_id,
+            callback.message.edit_media,
             InputMediaPhoto(png_io, caption=caption, parse_mode=ParseMode.HTML),
             reply_markup=keyboard,
         )
@@ -1321,7 +1336,9 @@ async def _cb_inventory(client: Client, callback: CallbackQuery, user_id: int, c
 
     is_media_msg = callback.message and (callback.message.photo or callback.message.animation or callback.message.document)
     if is_media_msg:
-        await callback.message.edit_media(
+        await enqueue_message_operation(
+            chat_id,
+            callback.message.edit_media,
             InputMediaPhoto(png_io, caption=caption, parse_mode=ParseMode.HTML),
             reply_markup=keyboard,
         )
@@ -1432,7 +1449,9 @@ async def _cb_album_season(client: Client, callback: CallbackQuery, user_id: int
 
     is_media_msg = callback.message and (callback.message.photo or callback.message.animation or callback.message.document)
     if is_media_msg:
-        await callback.message.edit_media(
+        await enqueue_message_operation(
+            chat_id,
+            callback.message.edit_media,
             InputMediaPhoto(png_io, caption=caption, parse_mode=ParseMode.HTML),
             reply_markup=keyboard,
         )
@@ -1508,7 +1527,9 @@ async def _cb_view_card(client: Client, callback: CallbackQuery, user_id: int, c
             [InlineKeyboardButton(back_label, callback_data=back_cb)]
         ])
 
-        await callback.message.edit_media(
+        await enqueue_message_operation(
+            chat_id,
+            callback.message.edit_media,
             InputMediaPhoto(buf),
             reply_markup=keyboard,
         )
@@ -1572,7 +1593,9 @@ async def _cb_view_card_back(client: Client, callback: CallbackQuery, user_id: i
         ])
 
         # 播放翻转动画（使用 Video 避免循环播放）
-        await callback.message.edit_media(
+        await enqueue_message_operation(
+            chat_id,
+            callback.message.edit_media,
             InputMediaVideo(flip_path),
             reply_markup=keyboard,
         )
@@ -1583,7 +1606,9 @@ async def _cb_view_card_back(client: Client, callback: CallbackQuery, user_id: i
         # 第二步：替换为固定的卡背图片（未持有显示灰度版本）
         back_path = f"/kmua/data/cards/season_{season_id}/card_{card_number:02d}_back.png"
         if is_currently_owned:
-            await callback.message.edit_media(
+            await enqueue_message_operation(
+                chat_id,
+                callback.message.edit_media,
                 InputMediaPhoto(back_path),
                 reply_markup=keyboard,
             )
@@ -1594,7 +1619,9 @@ async def _cb_view_card_back(client: Client, callback: CallbackQuery, user_id: i
             back_img.save(buf, format="PNG")
             buf.seek(0)
             buf.name = "card_back_gray.png"
-            await callback.message.edit_media(
+            await enqueue_message_operation(
+                chat_id,
+                callback.message.edit_media,
                 InputMediaPhoto(buf),
                 reply_markup=keyboard,
             )
@@ -1663,7 +1690,9 @@ async def _cb_view_card_front(client: Client, callback: CallbackQuery, user_id: 
         ])
 
         # 播放翻转动画（MP4 视频格式）
-        await callback.message.edit_media(
+        await enqueue_message_operation(
+            chat_id,
+            callback.message.edit_media,
             InputMediaVideo(flip_path),
             reply_markup=keyboard,
         )
@@ -1674,7 +1703,9 @@ async def _cb_view_card_front(client: Client, callback: CallbackQuery, user_id: 
         # 第二步：替换为固定的正面图片（未持有显示灰度版本）
         front_path = f"/kmua/data/cards/season_{season_id}/card_{card_number:02d}_full.png"
         if is_currently_owned:
-            await callback.message.edit_media(
+            await enqueue_message_operation(
+                chat_id,
+                callback.message.edit_media,
                 InputMediaPhoto(front_path),
                 reply_markup=keyboard,
             )
@@ -1685,7 +1716,9 @@ async def _cb_view_card_front(client: Client, callback: CallbackQuery, user_id: 
             front_img.save(buf, format="PNG")
             buf.seek(0)
             buf.name = "card_front_gray.png"
-            await callback.message.edit_media(
+            await enqueue_message_operation(
+                chat_id,
+                callback.message.edit_media,
                 InputMediaPhoto(buf),
                 reply_markup=keyboard,
             )
@@ -1842,7 +1875,9 @@ async def _cb_tokuten(client: Client, callback: CallbackQuery, user_id: int, cha
 
         if is_media_msg:
             # 从图片切换到图片（用 edit_media）
-            await callback.message.edit_media(
+            await enqueue_message_operation(
+                chat_id,
+                callback.message.edit_media,
                 InputMediaPhoto(tokuten_path, caption=caption, parse_mode=ParseMode.HTML),
                 reply_markup=keyboard,
             )
@@ -1919,7 +1954,9 @@ async def _cb_back_to_menu(client: Client, callback: CallbackQuery, user_id: int
 
         if is_media_msg:
             # 从图片切换到图片（用 edit_media）
-            await callback.message.edit_media(
+            await enqueue_message_operation(
+                chat_id,
+                callback.message.edit_media,
                 InputMediaPhoto(tokuten_path, caption=text, parse_mode=ParseMode.HTML),
                 reply_markup=_main_menu_keyboard(user_id, chat_id, topic_msg, is_active=is_active),
             )
@@ -1962,7 +1999,9 @@ async def _cb_back_to_menu(client: Client, callback: CallbackQuery, user_id: int
                 return
         else:
             # 从文本切换到文本（用 edit_text）
-            await callback.message.edit_text(
+            await enqueue_message_operation(
+                chat_id,
+                callback.message.edit_text,
                 text,
                 parse_mode=ParseMode.HTML,
                 reply_markup=_main_menu_keyboard(user_id, chat_id, topic_msg, is_active=is_active),
@@ -2059,7 +2098,11 @@ async def trade_sender_select_handler(client: Client, callback: CallbackQuery):
     user_id = callback.from_user.id
 
     if data == "trs_cancel":
-        await callback.message.edit_text("❌ 交易已取消")
+        await enqueue_message_operation(
+            callback.message.chat.id,
+            callback.message.edit_text,
+            "❌ 交易已取消"
+        )
         await callback.answer("已取消")
         return
 
@@ -2098,7 +2141,9 @@ async def trade_sender_select_handler(client: Client, callback: CallbackQuery):
         [InlineKeyboardButton("❌ 拒绝", callback_data=f"trade_cancel_{trade.id}")],
     ])
 
-    await callback.message.edit_text(
+    await enqueue_message_operation(
+        chat_id,
+        callback.message.edit_text,
         f"🤝 <b>交易请求</b>\n\n"
         f"出：{card_label}\n"
         f"等待对方选择一张同稀有度的卡交换\n"
@@ -2135,7 +2180,11 @@ async def _handle_trade_callback(client: Client, callback: CallbackQuery):
             await callback.answer("这不是你的交易", show_alert=True)
             return
         await database.cancel_trade(trade_id)
-        await callback.message.edit_text("❌ 交易已取消")
+        await enqueue_message_operation(
+            callback.message.chat.id,
+            callback.message.edit_text,
+            "❌ 交易已取消"
+        )
         await callback.answer("已取消")
 
     elif data.startswith("trade_view_"):
@@ -2186,7 +2235,11 @@ async def _handle_trade_callback(client: Client, callback: CallbackQuery):
             return
         if datetime.now(timezone.utc) > trade.expires_at:
             await database.cancel_trade(trade_id)
-            await callback.message.edit_text("⏰ 交易已过期")
+            await enqueue_message_operation(
+                callback.message.chat.id,
+                callback.message.edit_text,
+                "⏰ 交易已过期"
+            )
             await callback.answer("已过期", show_alert=True)
             return
 
@@ -2218,7 +2271,9 @@ async def _handle_trade_callback(client: Client, callback: CallbackQuery):
         ])
         sender_name = f'<a href="tg://user?id={trade.sender_id}">发起方</a>'
         receiver_name = f'<a href="tg://user?id={trade.receiver_id}">接收方</a>'
-        await callback.message.edit_text(
+        await enqueue_message_operation(
+            callback.message.chat.id,
+            callback.message.edit_text,
             f"🔄 <b>等待发起方确认</b>\n\n"
             f"{sender_name} 出：{s_emoji} #{sender_card_def.card_number} {sender_card_def.name}\n"
             f"{receiver_name} 出：{r_emoji} #{receiver_card_def.card_number} {receiver_card_def.name}\n\n"
@@ -2242,7 +2297,11 @@ async def _handle_trade_callback(client: Client, callback: CallbackQuery):
             return
         if datetime.now(timezone.utc) > trade.expires_at:
             await database.cancel_trade(trade_id)
-            await callback.message.edit_text("⏰ 交易已过期")
+            await enqueue_message_operation(
+                callback.message.chat.id,
+                callback.message.edit_text,
+                "⏰ 交易已过期"
+            )
             await callback.answer("已过期", show_alert=True)
             return
 
@@ -2286,7 +2345,9 @@ async def _handle_trade_callback(client: Client, callback: CallbackQuery):
         sender_name = f'<a href="tg://user?id={trade.sender_id}">发起方</a>'
         receiver_name = f'<a href="tg://user?id={trade.receiver_id}">接收方</a>'
 
-        await callback.message.edit_text(
+        await enqueue_message_operation(
+            callback.message.chat.id,
+            callback.message.edit_text,
             f"✅ <b>交易完成！</b>\n\n"
             f"{sender_name}：{s_emoji} #{sender_card_def.card_number} {sender_card_def.name}\n"
             f"  ⇄\n"
